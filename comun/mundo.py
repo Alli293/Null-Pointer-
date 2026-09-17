@@ -68,6 +68,45 @@ def distancia(a, b):
     return sqrt(dcol * dcol + drow * drow)
 
 
+def cubo_en_su_zona(cubo, depot, depot_size, grid, cube_side):
+    """Verificacion EXACTA de entrega (protocolo v2): el cubo entero adentro de
+    su zona rectangular, con cualquier rotacion. Devuelve (adentro, cuanto_falta).
+
+    Adaptada tal cual del contrato (CONTRATO.md, seccion "Cuando un cubo esta en
+    su zona"), que la da lista para copiar porque es la misma cuenta que usa el
+    sistema de visión para decidir el veredicto oficial -- no conviene
+    reinventarla con un umbral de distancia al centro.
+    """
+    distancias = {
+        "arriba": depot["row"],
+        "abajo": grid["rows"] - depot["row"],
+        "izquierda": depot["col"],
+        "derecha": grid["cols"] - depot["col"],
+    }
+    lado = min(distancias, key=lambda l: distancias[l])
+
+    if lado in ("arriba", "abajo"):
+        semi_col, semi_row = depot_size["length"] / 2, depot_size["depth"] / 2
+    else:
+        semi_col, semi_row = depot_size["depth"] / 2, depot_size["length"] / 2
+
+    margen = cube_side * sqrt(2) / 2
+
+    exceso_col = max(0.0, abs(cubo["col"] - depot["col"]) - (semi_col - margen))
+    exceso_row = max(0.0, abs(cubo["row"] - depot["row"]) - (semi_row - margen))
+    falta = sqrt(exceso_col * exceso_col + exceso_row * exceso_row)
+    return falta == 0.0, falta
+
+
+def tiempo_restante_ms(msg):
+    """Milisegundos que quedan de la fase actual segun el reloj OFICIAL del
+    mensaje (`clock.remaining_ms`), o None si el mensaje no trae `clock`
+    (mensajes viejos/otra version). No llevar un cronometro propio -- el del
+    rover se desincroniza del oficial (Regla 6.4 / seccion "clock" del contrato)."""
+    clock = msg.get("clock")
+    return clock.get("remaining_ms") if clock else None
+
+
 class EstimadorLatencia:
     """Mide cuanto ha crecido el retraso de los mensajes respecto a la primera
     muestra recibida, en vez de una latencia absoluta.
