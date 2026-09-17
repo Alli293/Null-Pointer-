@@ -6,8 +6,11 @@ CPython (PC, tests) y en MicroPython (ESP32).
 """
 
 # Version de protocolo que este equipo sabe interpretar. Si llega un mensaje con otra
-# version hay que descartarlo (Regla 5 del contrato: formato desconocido).
-VERSION_SOPORTADA = 1
+# version hay que descartarlo (Regla 6.5 del contrato: formato desconocido).
+#
+# El repo guia paso de v1 a v2 (sumo `clock`, `depot_size`, `cube_side`, y movio
+# `start` para que ya NO coincida con el origen). Ver docs/contrato_telemetria.md.
+VERSION_SOPORTADA = 2
 
 # Fases de una ronda, tal como las publica el sistema de vision.
 FASE_IDLE = "IDLE"
