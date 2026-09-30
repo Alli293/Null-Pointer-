@@ -62,6 +62,7 @@ def main():
         estado_previo = None
 
         while True:
+            indicador.actualizar()  # parpadeos del LED
             msg = cliente.leer_ultimo_mensaje()
             ahora = ahora_ms()
             if msg is not None and (
