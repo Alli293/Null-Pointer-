@@ -253,19 +253,42 @@ tiempo. No saltar pasos. Las ruedas en el aire son obligatorias hasta el paso 9.
 
 Guías completas en el repo guía: `vision-system/MONTAJE.md`, `PUESTA_A_PUNTO.md`, `OPERACION.md`.
 
-1. **Clonar e instalar el sistema de visión** (Python ≥ 3.10):
+**Progreso (30-sep-2026):** pasos 1, 2 y 3 **hechos y verificados** en esta PC. El sistema de visión
+está en `C:/Users/Allis/Documents/guia/vision-system` (con su `.venv`); `verificar_geometria` da
+`TODO OK`; el mock + `test_client` intercambiaron 80 mensajes sin pérdidas; y nuestro
+`ejecutar_simulacion.py` leyó el mock real (el rover se queda quieto en `READY`, como debe).
+**Pasos 4 a 8 pendientes: necesitan el hardware de abajo.**
+
+**Qué hay que conseguir / conectar para los pasos 4 a 8** (nada de esto es para conectar los rovers):
+
+| Qué | Para qué | Estado |
+|---|---|---|
+| **Webcam USB externa** (el repo trae perfiles para *Logitech C270* y *Argomtech CAM40*) | La cámara cenital | **No detectada**: hoy la PC solo ve la cámara integrada del portátil (`[0] Integrated Camera`, 640x480). Conectarla y repetir `diagnostico_camara --listar`. |
+| **Soporte para la cámara, mirando la cancha desde arriba** | Que vea los 4 marcadores de esquina completos. El repo trae una base para techo en `archivos_fabricacion/WebCam Base.stl` (impresión 3D, 4 tornillos con tuerca de 3/16" y 1 de 1/4", de 2 cm); un trípode o soporte improvisado sirve para probar. | Por definir |
+| **La cancha**: superficie de 1 m × 1 m cuadriculada (celdas de 2 cm) | Donde se mueven los rovers. Archivos: `archivos_fabricacion/cuadricula_1m_2cm_bn.svg` y `Cuadricula 1mx1m ArUco.pdf` | ¿Ya está impresa/armada? |
+| **4 marcadores de esquina** (IDs 0, 1, 2, 3, de 10 cm, con margen blanco) | Definen el sistema de coordenadas | Imprimir de `aruco/aruco_id0..3_negro10cm.pdf` **al 100 % de escala** y medir con regla |
+| **Cubos de 6 cm** rojo, verde y azul | Los objetos del reto (`archivos_fabricacion/cubos.dxf`) | ¿Ya están? |
+| Impresora, regla/cinta con mm, cartón o tabla rígida, cinta adhesiva | Calibración de la cámara (`PUESTA_A_PUNTO.md`) y pegar marcadores | — |
+| Los 2 rovers con sus stickers 10 y 11 | Paso 8 (verlos en la ventana). **Sin motores ni baterías**, solo ponerlos en la cancha | Stickers ya pegados |
+
+> En los pasos 4 a 8 los rovers **no necesitan estar conectados por USB ni encendidos**: solo se usan
+> como objetos con un marcador.
+
+1. ✅ **Clonar e instalar el sistema de visión** (Python ≥ 3.10) — *hecho*:
    ```bash
    git clone https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge.git ../Vision-Rover-Challenge
    cd ../Vision-Rover-Challenge/vision-system
    python -m venv .venv
    .venv\Scripts\python -m pip install -r vision/requirements.txt      # Windows
    ```
-2. **Comprobar la instalación** (no usa la cámara). Debe terminar en `RESULTADO GENERAL: TODO OK`:
+2. ✅ **Comprobar la instalación** (no usa la cámara) — *hecho*. Debe terminar en `RESULTADO GENERAL: TODO OK`:
    ```bash
    .venv\Scripts\python -m vision.tools.verificar_geometria
    ```
-3. **Probar el contrato sin cámara**: `python contrato/mock_publisher.py` en una terminal y
-   `python contrato/test_client.py` en otra (no requiere el venv).
+3. ✅ **Probar el contrato sin cámara** — *hecho*: `python contrato/mock_publisher.py` en una terminal y
+   `python contrato/test_client.py` en otra (no requiere el venv). El mock **lee comandos por teclado y se
+   cierra si no tiene entrada** (p. ej. lanzado en segundo plano sin stdin): déjalo en una terminal
+   interactiva. Con `ready` pasa a `READY` y tras 60 s a `RUNNING`.
 4. **Montar la cancha** (`MONTAJE.md`): los 4 marcadores de esquina (IDs 0–3) pegados con su margen
    blanco; los rovers con sus stickers (**10 y 11**, ya puestos); los cubos rojo/verde/azul.
 5. **Elegir la cámara**: `.venv\Scripts\python -m vision.tools.diagnostico_camara --listar` y luego
@@ -356,6 +379,8 @@ Guías completas en el repo guía: `vision-system/MONTAJE.md`, `PUESTA_A_PUNTO.m
 | `git clone` falla con `Filename too long` | Clonar en una ruta corta, p. ej. `C:\Users\<usuario>\Documents\Null-Pointer`. |
 | `fs ls` de mpremote da error `ilistdir` | CircuitPython no lo soporta; listar con `os.listdir` vía `exec` (lo hace `respaldar_rover.py`). |
 | En el ESP-NOW de CircuitPython, `e.send(...)` devuelve falsy aunque el mensaje llegó | Es normal: el valor no indica éxito. Verificar del lado receptor. |
+| El `mock_publisher.py` se cierra solo / `test_client` da `WinError 10061` | El mock lee comandos por stdin y termina si no hay entrada. Correrlo en una terminal normal (no en segundo plano) y esperar ~3 s antes de conectar el cliente. |
+| `diagnostico_camara --listar` solo muestra `Integrated Camera` | La webcam USB externa no está conectada, o Windows no le dio permiso de cámara. Conectarla y repetir. |
 | El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover. |
 | `RuntimeError: MAC desconocida` al arrancar | Una placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py`. |
 | El rover no conecta al WiFi | Red de 5 GHz (usar 2.4), SSID/clave mal escritos en `settings.toml`, o PC en otra red. |
