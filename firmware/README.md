@@ -6,7 +6,7 @@ El código de fábrica que traían los rovers está respaldado en [`rover_origin
 
 ## Qué falta (TODO) antes de correr en el robot completo
 
-- `config.py`: `MI_ARUCO_ID` por rover, `MAC_OTRO_ROVER`, `VISION_HOST`, cuál motor es izquierdo/derecho e inversión.
+- `config.py`: `VISION_HOST` (IP de la PC de visión); ID, color y MAC de cada rover ya se autodetectan por MAC.
 - Calibración de motores (`motores.py`, factores por motor).
 - Sensor de agarre: hoy es solo el ultrasónico (`sensores.py`); calibrar `DISTANCIA_AGARRE_CM`.
 - Control de rumbo con PID (`movimiento.py`) y maniobra de agarre/entrega.
@@ -30,7 +30,7 @@ CIRCUITPY_WIFI_SSID = "..."
 CIRCUITPY_WIFI_PASSWORD = "..."
 ```
 
-Cada rover necesita su propio `firmware/config.py` (ID ArUco y MAC del otro).
+El mismo `config.py` sirve para los dos rovers (se identifican por MAC).
 Cierra Thonny antes de usar `mpremote`: ambos no pueden compartir el puerto.
 
 ## Probar sin hardware

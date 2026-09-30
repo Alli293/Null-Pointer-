@@ -6,12 +6,28 @@ Las credenciales WiFi NO van aqui: viven en settings.toml del dispositivo
 """
 
 # --- Identidad de este rover -------------------------------------------------
-MI_ARUCO_ID = 10          # TODO: 10 u 11 segun el marcador fisico pegado al robot
-COLOR_INICIAL = "green"   # ver comun/protocolo_rovers.asignacion_estatica
+# Mismo archivo para los dos rovers: cada uno se reconoce por la MAC de su radio
+# (leida con `wifi.radio.mac_address`). El ID es el del marcador ArUco fisico
+# (diccionario 4X4), decodificado de fotos de los stickers.
+ROVERS = {
+    (224, 140, 254, 37, 199, 72): {"id": 10, "color": "red"},    # rover 1 (COM3 en banco)
+    (224, 140, 254, 39, 166, 120): {"id": 11, "color": "green"},  # rover 2 (COM12 en banco)
+}
 
-# MAC del OTRO rover para ESP-NOW (bytes de 6). TODO: leerla de cada placa con
-# `import wifi; wifi.radio.mac_address`.
-MAC_OTRO_ROVER = None
+
+def _yo():
+    import wifi
+    mac = tuple(wifi.radio.mac_address)
+    if mac not in ROVERS:
+        raise RuntimeError("MAC desconocida %r: agregarla a config.ROVERS" % (mac,))
+    return mac
+
+
+_MI_MAC = _yo()
+MI_ARUCO_ID = ROVERS[_MI_MAC]["id"]
+COLOR_INICIAL = ROVERS[_MI_MAC]["color"]  # ver comun/protocolo_rovers.asignacion_estatica
+# MAC del OTRO rover, para ESP-NOW.
+MAC_OTRO_ROVER = next(bytes(m) for m in ROVERS if m != _MI_MAC)
 
 # --- Red ---------------------------------------------------------------------
 VISION_HOST = "TODO"      # IP de la PC con el sistema de vision (nunca 127.0.0.1)
