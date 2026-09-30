@@ -30,6 +30,8 @@ class _Motor:
 
 def _instalar_fakes(monkeypatch, mundo_sim, max_mensajes):
     motores = {1: _Motor(), 2: _Motor()}
+    leds = []
+    motores["leds"] = leds
 
     board = types.ModuleType("board")
     board.__getattr__ = lambda nombre: nombre  # board.IO26 -> "IO26"
@@ -40,8 +42,25 @@ def _instalar_fakes(monkeypatch, mundo_sim, max_mensajes):
     ideaboard = types.ModuleType("ideaboard")
 
     class IdeaBoard:
+        instancias = 0
+
         def __init__(self):
+            # Como en el hardware real: una 2a instancia falla por pines PWM en uso.
+            IdeaBoard.instancias += 1
+            if IdeaBoard.instancias > 1:
+                raise RuntimeError("pin in use (IdeaBoard creada dos veces)")
             self.motor_1, self.motor_2 = motores[1], motores[2]
+            self.brightness = 1.0
+            self._pixel = (0, 0, 0)
+
+        @property
+        def pixel(self):
+            return self._pixel
+
+        @pixel.setter
+        def pixel(self, color):
+            self._pixel = color
+            leds.append(color)
 
         def DigitalIn(self, pin, pull=None):
             return types.SimpleNamespace(value=False)
@@ -144,3 +163,27 @@ def test_factor_de_velocidad_limita_la_potencia(monkeypatch):
     assert movimiento, "el rover nunca intento moverse"
     # Avance/empuje escalados por 0.3; los giros en el sitio (w_max 0.6) quedan fuera del factor.
     assert max(movimiento) <= 0.6 + 1e-9
+
+
+def test_led_muestra_conexion_y_estado_del_rover(monkeypatch):
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
+    monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 60)
+    main = importlib.import_module("firmware.main")
+    colores = importlib.import_module("firmware.indicador").COLORES
+    with pytest.raises(KeyboardInterrupt):
+        main.main()
+    leds = motores["leds"]
+    assert leds[0] == colores["conectando"]
+    assert colores["esperando"] in leds
+    assert colores["APROXIMAR"] in leds  # RUNNING: muestra el estado del FSM
+
+
+def test_led_rojo_si_falta_la_configuracion(monkeypatch):
+    monkeypatch.setattr("os.getenv", lambda k, d=None: None)
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 5)
+    main = importlib.import_module("firmware.main")
+    colores = importlib.import_module("firmware.indicador").COLORES
+    with pytest.raises(RuntimeError):
+        main.main()
+    assert motores["leds"][-1] == colores["error"]
