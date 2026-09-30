@@ -1,0 +1,4 @@
+# Archivos binarios: que Git no convierta saltos de linea (daña los PDF en Windows)
+*.pdf binary
+*.png binary
+*.jpg binary
