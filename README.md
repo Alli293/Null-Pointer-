@@ -361,7 +361,8 @@ Notas de esta prueba:
 - **Solo un programa puede usar la cámara a la vez**: hay que cerrar el sistema de visión (`q` en la ventana)
   antes de correr `diagnostico_camara`, la calibración o la medición de precisión.
 - Se usó el **perfil de cámara que ya trae el repo** (`logitech_c270`), aceptado como *compatible*. La
-  **calibración propia** (paso 6, `PUESTA_A_PUNTO.md`) está pendiente; ver la guía abajo.
+  **calibración propia** (paso 6) queda **omitida por ahora**: se espera que la cámara del reto ya venga
+  calibrada. Si más adelante las posiciones salen corridas, se hace con la guía de abajo.
 
 **Qué hay que conseguir / conectar para los pasos 4 a 8** (nada de esto es para conectar los rovers):
 
@@ -398,7 +399,7 @@ Notas de esta prueba:
 5. **Elegir la cámara**: `.venv\Scripts\python -m vision.tools.diagnostico_camara --listar` y luego
    sin `--listar` para **mirar la imagen** (el índice no coincide con el orden del nombre). Anotar el
    índice; si no es 0, usar `--indice N` en los comandos siguientes.
-6. **Calibrar la cámara** (`PUESTA_A_PUNTO.md`, necesita imprimir el patrón, regla y cartón). Si el
+6. ⏭️ **Calibrar la cámara — OMITIDO por ahora** (se espera cámara ya calibrada; guía en el paso 6 en detalle) (`PUESTA_A_PUNTO.md`, necesita imprimir el patrón, regla y cartón). Si el
    repo ya trae un perfil para tu modelo (`vision/calibraciones/logitech_c270.json`,
    `argomtech_cam40.json`), se puede usar ese.
 7. **Vista en vivo**: `.venv\Scripts\python -m vision.sistema --ventana` y comprobar mirando
@@ -411,7 +412,11 @@ Notas de esta prueba:
    girarlo antihorario y comprobar que `theta` sube. Con `python contrato/test_client.py` se ve el
    mensaje v2 real.
 
-#### Paso 6 en detalle: calibrar la cámara (`PUESTA_A_PUNTO.md` del repo guía)
+#### Paso 6 en detalle: calibrar la cámara (`PUESTA_A_PUNTO.md` del repo guía) — *solo si hace falta*
+
+> **Decisión (30-sep-2026): no se calibra por ahora**, porque se espera que la cámara del reto ya esté
+> calibrada. Esta guía queda por si las posiciones salen corridas o se cambia de cámara. Los PDF de
+> `calibracion/` ya están generados pero no hace falta imprimirlos todavía.
 
 Todo lente curva las líneas rectas y eso corre las posiciones que calcula la visión. Se mide cuánto
 curva **nuestra** cámara y se guarda como un perfil propio. Lo que sigue es lo que hay que hacer; el
