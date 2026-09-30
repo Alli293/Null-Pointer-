@@ -22,7 +22,7 @@ def test_cubo_por_color():
 
 def test_depot_por_color():
     depot = mundo.depot_por_color(d.MSG_NORMAL, "blue")
-    assert depot == {"color": "blue", "col": 40.5, "row": 40.5}
+    assert depot == {"color": "blue", "col": 21.5, "row": 39.25}
 
 
 def test_clasificar_frescura_umbrales():
@@ -86,3 +86,35 @@ def test_mensaje_utilizable_rechaza_idle():
 def test_mensaje_utilizable_acepta_running():
     est = mundo.EstimadorLatencia()
     assert mundo.mensaje_utilizable(d.MSG_NORMAL, d.MSG_NORMAL["ts_ms"], est)
+
+
+def test_cubo_en_su_zona_exactamente_en_el_centro():
+    # Mismo caso que el ejemplo de la seccion 2 del contrato: (21.480, 3.762)
+    # contra una zona centrada en (21.5, 3.75) da (True, 0.0).
+    cubo = {"color": "green", "col": 21.480, "row": 3.762, "age_ms": 0}
+    depot = d.DEPOTS[0]  # green, (21.5, 3.75)
+    adentro, falta = mundo.cubo_en_su_zona(cubo, depot, d.DEPOT_SIZE, d.GRID, d.CUBE_SIDE)
+    assert adentro
+    assert falta < 0.01
+
+
+def test_cubo_en_su_zona_lejos_del_depot():
+    cubo = mundo.cubo_por_color(d.MSG_ROVER_EN_DEPOT, "green")  # (26.0, 10.0)
+    depot = d.DEPOTS[0]
+    adentro, falta = mundo.cubo_en_su_zona(cubo, depot, d.DEPOT_SIZE, d.GRID, d.CUBE_SIDE)
+    assert not adentro
+    assert falta > 0
+
+
+def test_cubo_en_su_zona_msg_cubo_entregado():
+    cubo = mundo.cubo_por_color(d.MSG_CUBO_ENTREGADO, "green")
+    depot = mundo.depot_por_color(d.MSG_CUBO_ENTREGADO, "green")
+    adentro, _ = mundo.cubo_en_su_zona(
+        cubo, depot, d.MSG_CUBO_ENTREGADO["depot_size"], d.MSG_CUBO_ENTREGADO["grid"], d.MSG_CUBO_ENTREGADO["cube_side"]
+    )
+    assert adentro
+
+
+def test_tiempo_restante_ms():
+    assert mundo.tiempo_restante_ms(d.MSG_NORMAL) == d.MSG_NORMAL["clock"]["remaining_ms"]
+    assert mundo.tiempo_restante_ms({"phase": "IDLE"}) is None  # sin clock -> None

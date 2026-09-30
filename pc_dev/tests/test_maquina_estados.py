@@ -55,8 +55,26 @@ def test_transportar_a_entregar_por_distancia_a_depot():
 def test_entregar_a_ocioso_cuando_sensor_confirma():
     fsm = RoverFSM(mi_id=10, color_asignado="green")
     fsm.estado = ESTADO_ENTREGAR
+    # El cubo en MSG_ROVER_EN_DEPOT sigue lejos del depot (vision no lo confirmaria);
+    # solo pasa a OCIOSO porque el sensor del propio rover lo confirma.
     estado = fsm.transicion(d.MSG_ROVER_EN_DEPOT, cubo_entregado=True)
     assert estado == ESTADO_OCIOSO
+
+
+def test_entregar_a_ocioso_confirmado_solo_por_vision():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_ENTREGAR
+    # Sin cubo_entregado (sensor no dice nada) -- pero la vision ve el cubo
+    # asentado dentro de su zona, y eso alcanza (protocolo v2).
+    estado = fsm.transicion(d.MSG_CUBO_ENTREGADO)
+    assert estado == ESTADO_OCIOSO
+
+
+def test_entregar_no_pasa_a_ocioso_si_cubo_sigue_lejos():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_ENTREGAR
+    estado = fsm.transicion(d.MSG_ROVER_EN_DEPOT)  # sin sensor, cubo lejos del depot
+    assert estado == ESTADO_ENTREGAR
 
 
 def test_finished_detiene_desde_cualquier_estado():

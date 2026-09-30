@@ -45,7 +45,14 @@ class RoverFSM:
         via sus propios sensores (no vienen de la vision):
 
         - tiene_cubo: el rover confirmo que sujeto el cubo (sensor de color/IR/switch).
-        - cubo_entregado: el rover confirmo que solto el cubo dentro del depot.
+          El agarre no es verificable por vision (la camara ve el cubo cerca del
+          rover tanto si lo sujeto como si no), asi que esta señal es obligatoria.
+        - cubo_entregado: confirmacion adicional del propio rover (opcional). La
+          entrega SI es verificable por vision -- una vez soltado, el cubo se
+          asienta en una posicion que la camara puede comparar contra la zona
+          (protocolo v2: depot_size/cube_side, ver mundo.cubo_en_su_zona) -- asi
+          que ENTREGAR tambien sale solo con lo que ve la vision, sin depender de
+          que el firmware acierte el sensor.
 
         Devuelve el nuevo estado.
         """
@@ -88,7 +95,18 @@ class RoverFSM:
                 self.estado = ESTADO_ENTREGAR
 
         elif self.estado == ESTADO_ENTREGAR:
-            if cubo_entregado:
+            depot_size = msg.get("depot_size")
+            cube_side = msg.get("cube_side")
+            grid = msg.get("grid")
+            confirmado_por_vision = (
+                cubo is not None
+                and depot is not None
+                and depot_size is not None
+                and cube_side is not None
+                and grid is not None
+                and mundo.cubo_en_su_zona(cubo, depot, depot_size, grid, cube_side)[0]
+            )
+            if cubo_entregado or confirmado_por_vision:
                 self.estado = ESTADO_OCIOSO
 
         # ESTADO_OCIOSO: espera una reasignacion externa (asignar_color) que lo

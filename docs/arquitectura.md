@@ -44,16 +44,24 @@ con `pytest` en la PC y copiarlo tal cual al robot.
                                                                                    │
                                                                     (distancia a depot < umbral)
                                                                                    ▼
-                                        OCIOSO ◀──(sensor confirma entrega)── ENTREGAR
+                             OCIOSO ◀──(sensor O vision confirman entrega)── ENTREGAR
 
    cualquier estado ──(phase == FINISHED)──▶ DETENIDO
 ```
 
 Puntos importantes:
-- El agarre/entrega **no** se decide con telemetría de visión (esa da posición, no
-  contacto físico). Se confirma con sensores del propio rover (color/IR/switch) y se
-  pasa a `RoverFSM.transicion(...)` como parámetro explícito (`tiene_cubo`,
-  `cubo_entregado`) — así `comun/` no depende de qué sensor exacto usa el firmware.
+- El **agarre** no se puede decidir con telemetría de visión (esa da posición, no
+  contacto físico: un cubo cerca del rover se ve igual este sujeto o no). Se
+  confirma con sensores del propio rover (color/IR/switch) y se pasa a
+  `RoverFSM.transicion(...)` como parámetro explícito (`tiene_cubo`) — así
+  `comun/` no depende de qué sensor exacto usa el firmware.
+- La **entrega**, en cambio, sí es verificable por visión desde el protocolo v2:
+  una vez soltado, el cubo se asienta en una posición que la cámara reporta, y
+  `depot_size`/`cube_side` alcanzan para calcular con la fórmula exacta del
+  contrato si quedó completamente dentro de su zona
+  (`comun/mundo.cubo_en_su_zona`). Por eso `ENTREGAR → OCIOSO` sale con lo que
+  ve la visión, y `cubo_entregado` (señal del sensor) queda como confirmación
+  adicional/redundante, no como único camino.
 - `OCIOSO` es un estado a la espera de una nueva asignación de color (ver
   `protocolo_rovers.py`), no necesariamente el fin de la ronda.
 - `DETENIDO` (por `FINISHED`) tiene prioridad sobre cualquier otra transición.
