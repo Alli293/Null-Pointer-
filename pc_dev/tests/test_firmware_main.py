@@ -129,3 +129,18 @@ def test_main_exige_vision_host(monkeypatch):
     with pytest.raises(RuntimeError, match="VISION_HOST"):
         main.main()
     assert motores[1].throttle == 0.0 and motores[2].throttle == 0.0
+
+
+def test_factor_de_velocidad_limita_la_potencia(monkeypatch):
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
+    monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 80)
+    config = importlib.import_module("firmware.config")
+    config.FACTOR_VELOCIDAD = 0.3
+    main = importlib.import_module("firmware.main")
+    with pytest.raises(KeyboardInterrupt):
+        main.main()
+    movimiento = [abs(v) for v in motores[1].historial + motores[2].historial if abs(v) > 0.05]
+    assert movimiento, "el rover nunca intento moverse"
+    # Avance/empuje escalados por 0.3; los giros en el sitio (w_max 0.6) quedan fuera del factor.
+    assert max(movimiento) <= 0.6 + 1e-9

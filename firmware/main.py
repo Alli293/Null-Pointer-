@@ -11,6 +11,7 @@ from firmware.motores import Motores
 from firmware.sensores import Sensores
 
 from comun import contrato, mundo
+from comun.planificador import Planificador, VEL_CRUCERO, VEL_EMPUJE
 from comun.rover import ControladorRover
 
 # Si no llega telemetria valida por mas de esto, se frenan los motores.
@@ -47,7 +48,11 @@ def main():
 
         sensores = Sensores()
         estimador = mundo.EstimadorLatencia()
-        ctrl = ControladorRover(config.MI_ARUCO_ID, config.IDS_ROVERS)
+        planificador = Planificador(
+            vel_crucero=VEL_CRUCERO * config.FACTOR_VELOCIDAD,
+            vel_empuje=VEL_EMPUJE * config.FACTOR_VELOCIDAD,
+        )
+        ctrl = ControladorRover(config.MI_ARUCO_ID, config.IDS_ROVERS, planificador)
         ultimo_ok = ahora_ms()
         estado_previo = None
 
