@@ -456,6 +456,18 @@ superficie), tijeras. Los PDF ya están generados en [`calibracion/`](calibracio
 
 ### Fase B — Rover con ruedas en el aire, telemetría simulada
 
+**Progreso Fase B (30-sep-2026):**
+- **Red elegida: `Visitas`** (WPA2 con contraseña). El escaneo del rover mostró que el ESP32 solo ve canales 1, 4, 7 y 10
+  (**solo 2.4 GHz**, como dice la especificación del chip); la PC va por 5 GHz de la misma red y aun así se ven.
+  `Administrativo` también sirve en 2.4 GHz; `ExpoRobots` **no** es una red del reto (nombre visto en el escaneo, el repo guía no lo menciona).
+- **Firmware desplegado en el rover 2** (18 archivos, tamaño verificado). Al reiniciar imprimió
+  `rover 11 conectando WiFi...` y `conectado a vision 192.168.51.119 2026`, y la visión lo listó como cliente
+  (`192.168.51.8`): **misma red, sin aislamiento entre dispositivos**. La IP de la PC de visión (`VISION_HOST`)
+  se obtiene con `ipconfig` y cambia si la PC cambia de red.
+- Las credenciales van **solo** en `firmware/settings.toml` (Git lo ignora). **No** escribirlas en
+  `settings.toml.example`, que sí se sube al repo.
+- Pendiente: desplegar el rover 1, probar las fases `READY`/`RUNNING` y las ruedas con el rover levantado.
+
 9. **Red**: la PC y los rovers deben estar en la **misma red WiFi de 2.4 GHz** (el ESP32 no usa 5 GHz).
    Averiguar la IP de la PC (`ipconfig`) y **permitir el puerto 2026** en el firewall de Windows.
    Levantar el `mock_publisher.py` (escucha en `0.0.0.0:2026`).
@@ -528,6 +540,9 @@ superficie), tijeras. Los PDF ya están generados en [`calibracion/`](calibracio
 | En el ESP-NOW de CircuitPython, `e.send(...)` devuelve falsy aunque el mensaje llegó | Es normal: el valor no indica éxito. Verificar del lado receptor. |
 | El `mock_publisher.py` se cierra solo / `test_client` da `WinError 10061` | El mock lee comandos por stdin y termina si no hay entrada. Correrlo en una terminal normal (no en segundo plano) y esperar ~3 s antes de conectar el cliente. |
 | `vision.sistema` se cae con `UnicodeEncodeError ... '✓'` | Windows usa una codificación que no tiene el símbolo ✓ (pasa sobre todo al redirigir la salida). Definir `PYTHONIOENCODING=utf-8` antes de lanzarlo. |
+| `mpremote fs cp` falla con `OSError: [Errno 2] No such file/directory` al copiar al rover | En CircuitPython falla si el archivo destino **aún no existe** (solo copia si ya existía, como el `settings.toml` de fábrica). `herramientas/desplegar.py` ya no usa `fs cp`: escribe cada archivo con `open()` desde un `exec` (`_rover.subir`) y verifica el tamaño. |
+| Dejé la contraseña del WiFi en `settings.toml.example` | Ese archivo **se sube al repo**. Mover los datos a `firmware/settings.toml` (ignorado) y restaurar el ejemplo con `git checkout -- firmware/settings.toml.example`. Si ya se hizo commit/push con la clave, cambiarla en el router. |
+| Los números de COM cambian entre conexiones (el rover 2 pasó a `COM3`) | Identificar cada rover por su **UID/MAC** (`herramientas/info_rover.py`), no por el COM. |
 | `IdeaBoard` falla con "pin in use" | Se creó la placa dos veces. Todo el firmware la pide por `firmware/placa.py` (una sola instancia); no hacer `IdeaBoard()` en otros módulos. |
 | `diagnostico_camara --listar` solo muestra `Integrated Camera` | La webcam USB externa no está conectada, o Windows no le dio permiso de cámara. Conectarla y repetir. |
 | El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover. |
