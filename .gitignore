@@ -16,3 +16,4 @@ venv/
 
 # Logs y datos locales de pruebas
 *.log
+settings.toml

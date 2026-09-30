@@ -1,43 +1,39 @@
-# Firmware (MicroPython, ESP32)
+# Firmware (CircuitPython, IdeaBoard ESP32)
 
-Código que corre físicamente en cada CenfoBot. Importa la lógica de decisión
-de [`comun/`](../comun/) sin modificarla.
+Código que corre en cada CenfoBot (CRCibernetica IdeaBoard, CircuitPython 9.2.x).
+Importa la lógica de decisión de [`comun/`](../comun/) sin modificarla.
+El código de fábrica que traían los rovers está respaldado en [`rover_original/`](../rover_original/).
 
-## Qué falta antes de correr esto en un robot real
+## Qué falta (TODO) antes de correr en el robot completo
 
-Todo lo marcado `TODO` en este directorio depende de tener el robot en banco:
+- `config.py`: `MI_ARUCO_ID` por rover, `MAC_OTRO_ROVER`, `VISION_HOST`, cuál motor es izquierdo/derecho e inversión.
+- Calibración de motores (`motores.py`, factores por motor).
+- Sensor de agarre: hoy es solo el ultrasónico (`sensores.py`); calibrar `DISTANCIA_AGARRE_CM`.
+- Control de rumbo con PID (`movimiento.py`) y maniobra de agarre/entrega.
+- Negociación robusta rover↔rover (`comun/protocolo_rovers.py`).
 
-- Pines de motor/sensores en [`config.py`](config.py) — confirmar contra
-  `conexiones/README.md` y `robot.md` del [repo guía](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge).
-- Calibración de motores (`motores.py`) — adaptar `codigos/motor_calibration.py`.
-- Conexión WiFi y ESP-NOW reales (`main.py: conectar_wifi()`, `comm_espnow.py`).
-- Control de rumbo con PID (`movimiento.py`) — adaptar `codigos/code_PID.py`,
-  `codigos/move_heading.py`, `codigos/turn_angle.py`.
+## Despliegue
 
-## Flasheo (una vez el firmware esté listo para probar)
+Las librerías `ideaboard`, `hcsr04`, `adafruit_motor`, etc. ya vienen en `/lib` del rover.
 
-1. Instalar MicroPython en el ESP32 (una sola vez, con `esptool`):
-   ```bash
-   pip install esptool mpremote
-   esptool.py --chip esp32 erase_flash
-   esptool.py --chip esp32 write_flash -z 0x1000 <firmware-micropython.bin>
-   ```
-2. Copiar el código al dispositivo con `mpremote` (o `ampy`, o Thonny si se
-   prefiere GUI):
-   ```bash
-   mpremote connect <PUERTO> fs cp -r ../comun :comun
-   mpremote connect <PUERTO> fs cp -r . :firmware
-   mpremote connect <PUERTO> fs cp boot.py :boot.py
-   ```
-3. Editar `config.py` **en el dispositivo** (o antes de copiar) con el `MI_ARUCO_ID`,
-   credenciales WiFi e IP de la PC de visión correctos para ese rover específico —
-   cada uno de los dos robots necesita su propio `config.py`.
-4. Reiniciar el ESP32; `main.py` arranca solo.
+```bash
+pip install mpremote
+mpremote connect <PUERTO> fs cp -r ../comun :comun
+mpremote connect <PUERTO> fs cp -r . :firmware
+mpremote connect <PUERTO> fs cp code.py :code.py     # OJO: reemplaza el code.py de prueba
+```
 
-## Antes de esto: probar sin hardware
+Crear en la raíz del dispositivo un `settings.toml` (NO se sube al repo):
 
-Toda la lógica de decisión (`comun/`) y el ciclo completo se pueden probar sin
-ningún ESP32 usando [`pc_dev/`](../pc_dev/) — ver el README raíz y
-[`simulacion/README.md`](../simulacion/README.md). Solo lo que es
-genuinamente específico de hardware (motores, sensores, ESP-NOW) necesita el
-robot físico.
+```toml
+CIRCUITPY_WIFI_SSID = "..."
+CIRCUITPY_WIFI_PASSWORD = "..."
+```
+
+Cada rover necesita su propio `firmware/config.py` (ID ArUco y MAC del otro).
+Cierra Thonny antes de usar `mpremote`: ambos no pueden compartir el puerto.
+
+## Probar sin hardware
+
+La lógica de decisión se prueba con `pytest` en [`pc_dev/`](../pc_dev/).
+Este directorio solo compila en un dispositivo con CircuitPython.

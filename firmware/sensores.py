@@ -1,46 +1,49 @@
-"""Wrappers de los sensores a bordo del rover: IR, ultrasonico, color, IMU.
+"""Sensores a bordo: ultrasonico HCSR04 e infrarrojo (pines de fabrica).
 
-Adaptar de codigos/code_4IR.py, code_ultrasonic.py, color_detect.py y
-code_acc.py (repo guia) una vez confirmados los pines -- stubs por ahora.
-
-Estas lecturas son las que producen las señales `tiene_cubo` / `cubo_entregado`
-que main.py le pasa a RoverFSM.transicion(): la vision da posicion, no
-contacto fisico (ver docs/arquitectura.md).
+Producen las señales `tiene_cubo` / `cubo_entregado` de RoverFSM.transicion():
+la vision da posicion, no contacto fisico (ver docs/arquitectura.md).
 """
+
+import board
+from hcsr04 import HCSR04
+from ideaboard import IdeaBoard
 
 from firmware import config
 
 
 class Sensores:
     def __init__(self):
-        pass  # TODO: inicializar Pin/ADC/I2C reales sobre config.PIN_*
+        self._sonar = HCSR04(
+            getattr(board, config.PIN_ULTRASONICO_TRIG),
+            getattr(board, config.PIN_ULTRASONICO_ECHO),
+        )
+        self._ir = IdeaBoard().DigitalIn(getattr(board, config.PIN_IR))
+        self._tenia_cubo = False
 
-    def leer_infrarrojos(self):
-        """4 lecturas booleanas/analogas de los sensores IR (linea/borde)."""
-        return (False, False, False, False)  # TODO
+    def leer_infrarrojo(self):
+        return self._ir.value
 
     def leer_distancia_ultrasonico_cm(self):
-        return None  # TODO
-
-    def leer_color(self):
-        """Color detectado muy cerca del sensor (para confirmar agarre), o None."""
-        return None  # TODO
-
-    def leer_orientacion_imu(self):
-        """Lectura de acelerometro/giroscopio para correccion fina (code_acc.py)."""
-        return None  # TODO
+        """Distancia en cm, o None si la lectura falla / no hay eco."""
+        try:
+            d = self._sonar.dist_cm()
+        except Exception:
+            return None
+        return d if d and d > 0 else None
 
     def cubo_sujeto(self):
-        """True si el sensor de color/switch confirma que el cubo esta agarrado.
+        """True si el cubo esta dentro de las paletas (ultrasonico cercano).
 
-        Usado como `tiene_cubo` en RoverFSM.transicion().
+        TODO: reforzar con sensor de color/switch si el kit lo trae; hoy es
+        solo una heuristica de distancia.
         """
-        return self.leer_color() is not None  # TODO: heuristica real
+        d = self.leer_distancia_ultrasonico_cm()
+        sujeto = d is not None and d <= config.DISTANCIA_AGARRE_CM
+        self._tenia_cubo = sujeto
+        return sujeto
 
     def cubo_liberado_en_depot(self):
-        """True si se confirmo la entrega (p.ej. el sensor de color deja de ver
-        el cubo justo despues de la maniobra de soltar).
-
-        Usado como `cubo_entregado` en RoverFSM.transicion().
-        """
-        return False  # TODO
+        """True cuando el cubo deja de detectarse tras haberlo tenido."""
+        d = self.leer_distancia_ultrasonico_cm()
+        suelto = d is None or d > config.DISTANCIA_AGARRE_CM
+        return self._tenia_cubo and suelto

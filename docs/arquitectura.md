@@ -10,7 +10,7 @@
                                  │ telemetría (rovers, cubes, depots, phase)
                                  ▼
    ┌───────────────────────────────────────────────────────────────────┐
-   │  comun/  — lógica de decisión pura (CPython y MicroPython)        │
+   │  comun/  — lógica de decisión pura (CPython y CircuitPython)        │
    │    contrato.py         constantes + validación del mensaje        │
    │    mundo.py            emparejar por identidad, frescura, latencia│
    │    maquina_estados.py  RoverFSM: qué hacer según el mundo         │
@@ -28,7 +28,7 @@
 ```
 
 `comun/` no importa nada de `firmware/` ni de `pc_dev/`, y no usa ninguna librería que
-no exista en MicroPython (nada de `dataclasses`, `typing` en tiempo de ejecución,
+no exista en CircuitPython (nada de `dataclasses`, `typing` en tiempo de ejecución,
 `enum`, etc. — solo `dict`/`list`/constantes simples). Eso es lo que permite probarlo
 con `pytest` en la PC y copiarlo tal cual al robot.
 

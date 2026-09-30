@@ -1,30 +1,33 @@
-"""Comunicacion rover-a-rover via ESP-NOW.
+"""Comunicacion rover-a-rover via ESP-NOW (modulo `espnow` de CircuitPython 9).
 
-Adaptar de codigos/espnow_bidirectional.py (repo guia). Usa el formato de
-mensaje de comun/protocolo_rovers.py para que ambos lados (PC de simulacion en
-pruebas de logica, y ESP32 real) hablen el mismo dict.
-
-TODO: la libreria `espnow` de MicroPython (modulo nativo del port ESP32) da
-send()/recv() a nivel de bytes -- aca falta el (de)serializador y el registro
-de la MAC del otro rover como peer.
+Usa el formato de mensaje de comun/protocolo_rovers.py. La negociacion robusta
+ante mensajes perdidos sigue pendiente (ver docs/arquitectura.md).
 """
 
 import json
 
+import espnow
+
 
 class ComunicacionRovers:
     def __init__(self, mac_otro_rover=None):
-        self.mac_otro_rover = mac_otro_rover
-        # TODO: import espnow; self._e = espnow.ESPNow(); self._e.active(True);
-        # self._e.add_peer(mac_otro_rover)
+        self._e = espnow.ESPNow()
+        self._peer = None
+        if mac_otro_rover is not None:
+            self._peer = espnow.Peer(mac=bytes(mac_otro_rover))
+            self._e.peers.append(self._peer)
 
     def enviar(self, mensaje_dict):
-        payload = json.dumps(mensaje_dict).encode("utf-8")
-        # TODO: self._e.send(self.mac_otro_rover, payload)
+        if self._peer is None:
+            return
+        self._e.send(json.dumps(mensaje_dict).encode("utf-8"), self._peer)
 
     def recibir_no_bloqueante(self):
-        """Devuelve el proximo mensaje dict recibido, o None si no hay nada
-        nuevo. No debe bloquear -- el loop principal en main.py es de un solo
-        hilo y tambien tiene que leer telemetria de vision."""
-        # TODO: mac, payload = self._e.irecv(0); parsear payload con json.loads
-        return None
+        """Proximo mensaje dict recibido, o None. No bloquea."""
+        if len(self._e) == 0:
+            return None
+        paquete = self._e.read()
+        try:
+            return json.loads(paquete.msg)
+        except ValueError:
+            return None
