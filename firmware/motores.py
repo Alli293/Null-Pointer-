@@ -3,14 +3,12 @@
 throttle va de -1.0 a 1.0; 0.0 frena; None deja rodar libre.
 """
 
-from ideaboard import IdeaBoard
-
-from firmware import config
+from firmware import config, placa
 
 
 class Motores:
     def __init__(self):
-        self._ib = IdeaBoard()
+        self._ib = placa.ideaboard()
         self._izq = getattr(self._ib, "motor_%d" % config.MOTOR_IZQ)
         self._der = getattr(self._ib, "motor_%d" % config.MOTOR_DER)
         # TODO: calibrar (un motor suele girar mas rapido que el otro).

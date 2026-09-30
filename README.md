@@ -177,6 +177,31 @@ python -m mpremote connect COM3 repl
 > reinicia: tener las ruedas en el aire y `VISION_HOST` configurado (si falta, el firmware
 > aborta con un mensaje y deja los motores frenados).
 
+### Sin cable USB: indicador LED
+
+Para las pruebas en el suelo los rovers van **sin cable a la PC** (autonomía del reto, y el cable se
+enreda). Sin USB no hay REPL ni `print`, así que el LED RGB de la placa dice qué hace el rover
+(`firmware/indicador.py`):
+
+| Color del LED | Significa |
+|---|---|
+| 🟡 Amarillo | Arrancando: conectando al WiFi / a la visión |
+| 🔵 Azul tenue | Conectado a la visión, esperando que la ronda pase a `RUNNING` (no se mueve) |
+| 🟣 Violeta | `BUSCAR` (sin cubo fresco que atender) |
+| 🔵 Azul fuerte | `APROXIMAR` (yendo a ubicarse detrás del cubo) |
+| 🟪 Magenta | `SUJETAR` (empujando hasta confirmar que lleva el cubo) |
+| 🟢 Verde | `TRANSPORTAR` (empujando el cubo al depot) |
+| 🩵 Cian | `ENTREGAR` (soltó el cubo, retrocede) |
+| ⚪ Blanco | `OCIOSO` (terminó su cola de colores) |
+| 🌸 Rosa | `DETENIDO` (ronda terminada, `FINISHED`) |
+| 🟠 Naranja | Dejó de llegar telemetría: motores frenados |
+| 🔴 Rojo | **Error** (p. ej. falta `VISION_HOST` en `settings.toml`): motores frenados. Conectar el USB y ver el mensaje con `mpremote ... repl` |
+
+Antes de quitar el cable: confirmar que la placa **enciende con las baterías** (hoy no sabemos si la
+batería de motores también alimenta la lógica), que `settings.toml` está copiado y que las ruedas
+están en el aire para el primer arranque sin USB. El firmware arranca solo al dar energía y **no se
+mueve** mientras la fase no sea `RUNNING`. La PC de visión debe seguir encendida y en la misma red.
+
 ---
 
 ## 5. Simulación y tests
@@ -299,13 +324,29 @@ Guías completas en el repo guía: `vision-system/MONTAJE.md`, `PUESTA_A_PUNTO.m
 está en `C:/Users/Allis/Documents/guia/vision-system` (con su `.venv`); `verificar_geometria` da
 `TODO OK`; el mock + `test_client` intercambiaron 80 mensajes sin pérdidas; y nuestro
 `ejecutar_simulacion.py` leyó el mock real (el rover se queda quieto en `READY`, como debe).
-**Pasos 4 a 8 pendientes: necesitan el hardware de abajo.**
+**Paso 5 (elegir cámara) hecho:** la webcam **Logitech C270** está conectada. Ojo: `--listar` dice
+`[0] Logi C270` y `[1] Integrated Camera`, pero **la que mira el tablero es el índice 1** (`--indice 1`; el
+índice 0 sale negro). El nombre no coincide con el número, tal como advierte el repo guía: se confirma
+**mirando la imagen**. Con `--indice 1 --camara logitech_c270` el sistema abre la C270 a 1280x720, el
+perfil sale *compatible* y publica en el puerto 2026.
+
+```bash
+cd C:/Users/Allis/Documents/guia/vision-system
+set PYTHONIOENCODING=utf-8        # en cmd; en PowerShell: $env:PYTHONIOENCODING="utf-8"
+.venv\Scripts\python -m vision.sistema --indice 1 --camara logitech_c270 --ventana
+```
+
+**Primer hallazgo con la cámara real:** en la primera imagen solo se veía completo **1 de los 4
+marcadores de esquina** (el ID 2); los otros estaban cortados por el borde o fuera de cuadro, y el
+sistema no publicó coordenadas (rovers y cubos vacíos). **Hay que reubicar la cámara** (más alta o más
+centrada) hasta que la ventana dibuje los 4 marcadores completos.
+**Pasos 4 y 6 a 8 pendientes** (montaje de la cancha, calibración, vista en vivo y ver los rovers).
 
 **Qué hay que conseguir / conectar para los pasos 4 a 8** (nada de esto es para conectar los rovers):
 
 | Qué | Para qué | Estado |
 |---|---|---|
-| **Webcam USB externa** (el repo trae perfiles para *Logitech C270* y *Argomtech CAM40*) | La cámara cenital | **No detectada**: hoy la PC solo ve la cámara integrada del portátil (`[0] Integrated Camera`, 640x480). Conectarla y repetir `diagnostico_camara --listar`. |
+| **Webcam USB externa** (el repo trae perfiles para *Logitech C270* y *Argomtech CAM40*) | La cámara cenital | ✅ **Detectada** (Logi C270, `--indice 1`). Falta el soporte/altura para que vea los 4 marcadores. |
 | **Soporte para la cámara, mirando la cancha desde arriba** | Que vea los 4 marcadores de esquina completos. El repo trae una base para techo en `archivos_fabricacion/WebCam Base.stl` (impresión 3D, 4 tornillos con tuerca de 3/16" y 1 de 1/4", de 2 cm); un trípode o soporte improvisado sirve para probar. | Por definir |
 | **La cancha**: superficie de 1 m × 1 m cuadriculada (celdas de 2 cm) | Donde se mueven los rovers. Archivos: `archivos_fabricacion/cuadricula_1m_2cm_bn.svg` y `Cuadricula 1mx1m ArUco.pdf` | ¿Ya está impresa/armada? |
 | **4 marcadores de esquina** (IDs 0, 1, 2, 3, de 10 cm, con margen blanco) | Definen el sistema de coordenadas | Imprimir de `aruco/aruco_id0..3_negro10cm.pdf` **al 100 % de escala** y medir con regla |
@@ -422,6 +463,8 @@ está en `C:/Users/Allis/Documents/guia/vision-system` (con su `.venv`); `verifi
 | `fs ls` de mpremote da error `ilistdir` | CircuitPython no lo soporta; listar con `os.listdir` vía `exec` (lo hace `respaldar_rover.py`). |
 | En el ESP-NOW de CircuitPython, `e.send(...)` devuelve falsy aunque el mensaje llegó | Es normal: el valor no indica éxito. Verificar del lado receptor. |
 | El `mock_publisher.py` se cierra solo / `test_client` da `WinError 10061` | El mock lee comandos por stdin y termina si no hay entrada. Correrlo en una terminal normal (no en segundo plano) y esperar ~3 s antes de conectar el cliente. |
+| `vision.sistema` se cae con `UnicodeEncodeError ... '✓'` | Windows usa una codificación que no tiene el símbolo ✓ (pasa sobre todo al redirigir la salida). Definir `PYTHONIOENCODING=utf-8` antes de lanzarlo. |
+| `IdeaBoard` falla con "pin in use" | Se creó la placa dos veces. Todo el firmware la pide por `firmware/placa.py` (una sola instancia); no hacer `IdeaBoard()` en otros módulos. |
 | `diagnostico_camara --listar` solo muestra `Integrated Camera` | La webcam USB externa no está conectada, o Windows no le dio permiso de cámara. Conectarla y repetir. |
 | El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover. |
 | `RuntimeError: MAC desconocida` al arrancar | Una placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py`. |

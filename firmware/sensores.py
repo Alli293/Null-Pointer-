@@ -6,9 +6,7 @@ la vision da posicion, no contacto fisico (ver docs/arquitectura.md).
 
 import board
 from hcsr04 import HCSR04
-from ideaboard import IdeaBoard
-
-from firmware import config
+from firmware import config, placa
 
 
 class Sensores:
@@ -17,7 +15,7 @@ class Sensores:
             getattr(board, config.PIN_ULTRASONICO_TRIG),
             getattr(board, config.PIN_ULTRASONICO_ECHO),
         )
-        self._ir = IdeaBoard().DigitalIn(getattr(board, config.PIN_IR))
+        self._ir = placa.ideaboard().DigitalIn(getattr(board, config.PIN_IR))
         self._tenia_cubo = False
 
     def leer_infrarrojo(self):
