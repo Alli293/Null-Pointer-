@@ -215,6 +215,8 @@ oclusiones) pero **no reacciona** a los comandos de los rovers.
   y 90°/s). Hay que calibrar la diferencia entre los dos motores (factores en `motores.py`) y
   la **potencia mínima** a la que las ruedas realmente arrancan.
 - [ ] `DISTANCIA_AGARRE_CM` (hoy 4 cm, inventado) y dónde apunta el ultrasónico.
+- [ ] **Rampa de aceleración** (limitar cuánto puede cambiar la potencia por ciclo) para arranques
+  suaves; hoy solo existe `FACTOR_VELOCIDAD` (config.py).
 - [ ] Constantes de `comun/planificador.py` (distancias de preagarre, rodeo, velocidades) y
   umbrales de `comun/maquina_estados.py`.
 - [ ] Offset entre el centro del marcador ArUco y el centro real del chasis (el repo guía trae
@@ -248,6 +250,46 @@ oclusiones) pero **no reacciona** a los comandos de los rovers.
 
 Orden pensado para que **cada paso valide una sola cosa** y no se arriesgue el robot antes de
 tiempo. No saltar pasos. Las ruedas en el aire son obligatorias hasta el paso 9.
+
+### Tips para que funcione mejor (leer antes de empezar)
+
+**1. Contar cuadros: la cancha es su propia regla.** 1 cuadro = 1 celda = 20 mm. Cada vez que
+algo "parece raro", contar cuadros con los ojos es la comprobación más barata:
+
+| Qué quieres saber | Cómo contar | Qué debe dar |
+|---|---|---|
+| ¿La cancha está bien montada? | Contar cuadros **de centro a centro** de dos marcadores de esquina vecinos | **43 cuadros** (860 mm). El tablero físico tiene 50×50 cuadros, pero el área de juego son 43×43: los 7 de diferencia son el margen donde van los marcadores. Si da otro número, el montaje está mal; no ajustar el código para compensar. |
+| ¿La visión ubica bien? | Poner un cubo o rover en un cuadro conocido, contar desde el **centro del marcador 0** (origen) cuántos cuadros a la derecha (`col`) y hacia abajo (`row`), y comparar con lo que reporta `test_client.py` o la ventana | Coincidir con ≤ 1 cuadro de diferencia. Si `col` no sube al ir a la derecha o `row` no sube al ir hacia abajo, los marcadores están en orden equivocado. |
+| ¿Qué tan rápido va el rover? | Marcar un cuadro de salida, avanzar con potencia fija un tiempo medido (cronómetro) y **contar cuadros recorridos**; velocidad = cuadros ÷ segundos. Repetir 3 veces y promediar | Anotar el valor por rover y por potencia; compararlo con lo que asume el simulador (6 celdas/s a potencia 1.0, `VEL_MAX` en `pc_dev/simulador_fisico.py`). |
+| ¿Se desvía al ir "recto"? | Avanzar 20 cuadros y contar cuántos cuadros **de lado** se corrió | Desvío ≈ 0. Si siempre se corre al mismo lado, ajustar los factores de calibración izquierda/derecha de `firmware/motores.py`. |
+| ¿Cuánto gira? | Girar en el sitio un tiempo fijo y leer `theta` en la vista de la cámara antes y después | Grados por segundo por rover (el simulador asume 90°/s a potencia 1.0, `GIRO_MAX`). |
+| ¿A qué distancia "ve" el cubo el ultrasónico? | Poner el cubo a 1, 2, 3… cuadros del frente y leer el sensor (un cubo mide 3 cuadros de lado) | Fija `DISTANCIA_AGARRE_CM` en `firmware/config.py`. |
+
+Anotar los resultados (rover, potencia, cuadros, segundos) en un archivo del repo, p. ej.
+`docs/calibracion.md`, para no repetir mediciones.
+
+**2. Movimientos muy suaves primero, optimizar después.**
+
+- **Orden de pruebas, de menos a más riesgo:** ruedas en el aire → suelo, espacio libre, sin cubos →
+  un cubo con un solo rover → los dos rovers. No pasar al siguiente hasta repetir 3 veces el actual sin
+  fallos.
+- **`FACTOR_VELOCIDAD` en `firmware/config.py`** (hoy **0.5**) multiplica las velocidades de avance y de
+  empuje del planificador. Empezar con 0.5 (o menos) y subirlo de 0.1 en 0.1 **solo** después de 3
+  corridas limpias. Si a un valor bajo las ruedas ni arrancan, el motor tiene una **potencia mínima**:
+  subirlo hasta que arranque y anotar ese valor.
+- **Cambiar una sola cosa por prueba** y anotar qué se cambió; si no, no se sabe qué arregló o rompió.
+- **Lo que el factor NO suaviza** (se edita a mano si hace falta aún más suavidad): los giros en el
+  sitio (`w_max` y el piso de giro en `comun/navegacion.py: comando_hacia_rumbo`) y la marcha atrás
+  (`VEL_RETROCESO` en `comun/planificador.py`). Tampoco hay **rampa de aceleración** todavía (los
+  arranques son bruscos): está en la lista de pendientes.
+- **Siempre una forma de cortar**: mano junto al interruptor de la batería de motores; `f` (stop) en la
+  vista de la cámara; `Ctrl-C` en el REPL del rover. El firmware frena los motores solo si se pierde la
+  telemetría por más de 0.5 s.
+- **Empuje suave = el cubo no se escapa.** En el simulador el caso que más falla es el cubo que se
+  resbala hacia un lado al empujarlo demasiado rápido.
+- **Después de que funcione a baja velocidad** se optimiza: subir `FACTOR_VELOCIDAD` hacia 1.0, reducir
+  distancias de preagarre/rodeo en `comun/planificador.py`, recalibrar los números del simulador con lo
+  medido y volver a correr `pytest`.
 
 ### Fase A — Sistema de visión y cámara (solo PC, sin rovers)
 
@@ -341,7 +383,7 @@ está en `C:/Users/Allis/Documents/guia/vision-system` (con su `.venv`); `verifi
 
 ### Fase C — Calibración con los rovers
 
-16. **Potencia mínima y velocidad**: con el rover en el suelo y un espacio libre, medir cuánta potencia
+16. **Potencia mínima y velocidad** (contando cuadros, ver los tips de arriba): con el rover en el suelo y un espacio libre, medir cuánta potencia
     hace falta para arrancar y cuánto avanza por segundo a 0.5, 0.7 y 1.0; y cuánto gira por segundo
     en el sitio. Ajustar `_factor_izq/_factor_der` en `motores.py` hasta que avance recto y actualizar
     las constantes del simulador (`VEL_MAX`, `GIRO_MAX`) con lo medido.

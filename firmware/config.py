@@ -51,3 +51,9 @@ PIN_ULTRASONICO_ECHO = "IO25"
 PIN_IR = "IO33"                 # ejemplo de fabrica code_IR.py (ojo: code.py de
                                 # prueba usa IO33 para un NeoPixel; confirmar cableado)
 DISTANCIA_AGARRE_CM = 4.0       # TODO: calibrar -- cubo "dentro" de las paletas
+
+# --- Suavidad ----------------------------------------------------------------
+# Multiplica las velocidades de crucero y de empuje del planificador. Empezar
+# SUAVE (0.5) y subir a 1.0 cuando todo funcione. Si a este valor las ruedas ni
+# arrancan (potencia por debajo de la minima del motor), subirlo de a poco.
+FACTOR_VELOCIDAD = 0.5
