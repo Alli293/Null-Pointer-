@@ -11,13 +11,13 @@ decisión corre a bordo de los rovers, sin PC externa durante la ronda.
 | Carpeta       | Dónde corre                | Qué contiene |
 |---------------|-----------------------------|--------------|
 | [`comun/`](comun/)       | **PC y ESP32** (mismo código) | Lógica de decisión pura: parseo/validación del contrato de telemetría, emparejamiento cubo↔depot, máquina de estados del rover. Un solo lugar de verdad para que la simulación en PC y el robot real nunca diverjan. |
-| [`firmware/`](firmware/)   | Solo ESP32 (MicroPython)   | Lo que depende de hardware: motores, sensores, ESP-NOW, cliente TCP de visión. Importa `comun/`. |
+| [`firmware/`](firmware/)   | Solo ESP32 (CircuitPython)   | Lo que depende de hardware: motores, sensores, ESP-NOW, cliente TCP de visión. Importa `comun/`. |
 | [`pc_dev/`](pc_dev/)     | Solo PC                    | Herramientas para iterar sin flashear ni tener el robot a mano: cliente de escritorio, runner de simulación, tests (`pytest`). |
 | [`docs/`](docs/)       | —                           | Resumen propio del contrato de telemetría y decisiones de arquitectura. |
 | [`simulacion/`](simulacion/) | —                       | Cómo levantar el publisher simulado del repo guía para probar en vivo sin hardware. |
 
 La idea central: la lógica de decisión (`comun/`) se escribe una sola vez, en un
-subconjunto de Python compatible con CPython y MicroPython, se prueba con `pytest`
+subconjunto de Python compatible con CPython y CircuitPython, se prueba con `pytest`
 en la PC, y se copia **sin cambios** al ESP32. Así lo que se validó en simulación es
 literalmente lo que corre en el robot.
 

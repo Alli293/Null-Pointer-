@@ -1,7 +1,7 @@
 """Helpers para leer el mundo (mensaje de telemetria) por identidad, nunca por
 posicion en la lista (Regla 1 del contrato).
 
-Portable CPython <-> MicroPython: solo dict/list/math basico, sin dependencias
+Portable CPython <-> CircuitPython: solo dict/list/math basico, sin dependencias
 externas.
 """
 
@@ -9,7 +9,7 @@ from comun import contrato
 
 try:
     from math import sqrt
-except ImportError:  # pragma: no cover - MicroPython siempre trae math
+except ImportError:  # pragma: no cover - CircuitPython siempre trae math
     def sqrt(x):
         return x ** 0.5
 

@@ -24,18 +24,19 @@ from comun.maquina_estados import (
 
 
 def conectar_wifi():
-    # TODO: import network; activar STA_IF; connect(config.WIFI_SSID, ...);
-    # esperar a isconnected(). Se deja fuera del esqueleto porque no es
-    # observable/probable sin hardware real.
-    pass
+    # Credenciales en settings.toml del dispositivo (no en el repo).
+    import os
+    import wifi
+
+    wifi.radio.connect(
+        os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD")
+    )
 
 
 def ahora_ms():
-    # TODO: en MicroPython real, utime.ticks_ms() es un contador monotonico
-    # (no epoca), lo cual es exactamente lo que necesita EstimadorLatencia
-    # (solo le importa la diferencia entre muestras, no el valor absoluto).
-    import utime
-    return utime.ticks_ms()
+    # Contador monotonico (no epoca): EstimadorLatencia solo usa diferencias.
+    import time
+    return time.monotonic_ns() // 1000000
 
 
 def main():
@@ -44,7 +45,7 @@ def main():
     cliente_vision = ClienteVision(config.VISION_HOST, config.VISION_PORT)
     cliente_vision.conectar()
 
-    radio_rovers = ComunicacionRovers()
+    radio_rovers = ComunicacionRovers(config.MAC_OTRO_ROVER)
     control = ControladorMovimiento()
     sensores = Sensores()
     estimador_latencia = mundo.EstimadorLatencia()

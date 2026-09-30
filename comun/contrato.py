@@ -2,7 +2,7 @@
 
 Ver docs/contrato_telemetria.md para el detalle completo. Este modulo NO usa nada
 fuera de la libreria estandar minima (dict/list/str/int) para poder correr igual en
-CPython (PC, tests) y en MicroPython (ESP32).
+CPython (PC, tests) y en CircuitPython (ESP32).
 """
 
 # Version de protocolo que este equipo sabe interpretar. Si llega un mensaje con otra
