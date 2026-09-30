@@ -39,6 +39,44 @@ def mpremote(puerto, *args, timeout=60):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
+def subir(puerto, local, remoto):
+    """Copia un archivo al rover escribiendolo con open() desde un exec.
+
+    `mpremote fs cp` falla en CircuitPython con "OSError: [Errno 2]" cuando el archivo
+    destino todavia NO existe (solo funciona si ya existia, p. ej. el settings.toml de
+    fabrica). Esto crea las carpetas, escribe el contenido y verifica el tamano.
+    Devuelve (ok, mensaje). `remoto` sin ":" inicial, p. ej. "comun/rover.py".
+    """
+    import base64
+
+    with open(local, "rb") as f:
+        datos = f.read()
+    if local.endswith(".py"):
+        datos = datos.replace(b"\r\n", b"\n")  # git en Windows puede dejarlos en CRLF
+    b64 = base64.b64encode(datos).decode()
+    codigo = (
+        "import os, binascii\n"
+        "destino = %r\n"
+        "ruta = ''\n"
+        "for parte in destino.split('/')[:-1]:\n"
+        "    ruta += '/' + parte\n"
+        "    try:\n"
+        "        os.mkdir(ruta)\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "f = open('/' + destino, 'wb')\n"
+        "f.write(binascii.a2b_base64(%r))\n"
+        "f.close()\n"
+        "print(os.stat('/' + destino)[6])\n"
+    ) % (remoto, b64)
+    cod, salida = mpremote(puerto, "exec", codigo)
+    if cod != 0:
+        return False, salida[-300:]
+    if salida.strip().splitlines()[-1].strip() != str(len(datos)):
+        return False, "tamano distinto: rover=%s local=%d" % (salida.strip()[-20:], len(datos))
+    return True, "%d bytes" % len(datos)
+
+
 def ejecutar(puerto, codigo, timeout=60):
     """Ejecuta codigo Python en el rover (desde RAM, sin guardar nada)."""
     interrumpir(puerto)

@@ -38,12 +38,11 @@ def main():
         return 0
 
     _rover.interrumpir(a.puerto)
-    for carpeta in (":comun", ":firmware"):
-        _rover.mpremote(a.puerto, "fs", "mkdir", carpeta)  # si ya existe, falla sin problema
     for origen, destino in archivos:
-        cod, salida = _rover.mpremote(a.puerto, "fs", "cp", origen, destino)
-        if cod != 0:
-            print("ERROR copiando", destino, salida)
+        # No usamos `mpremote fs cp`: falla en CircuitPython con archivos nuevos (ver _rover.subir).
+        ok, msg = _rover.subir(a.puerto, origen, destino.lstrip(":"))
+        print(("  ok    " if ok else "  ERROR ") + destino + "  " + msg)
+        if not ok:
             return 1
     print("Listo. Reinicia el rover (boton o desenchufar) para que arranque code.py.")
     return 0
