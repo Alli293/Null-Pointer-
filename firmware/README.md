@@ -6,10 +6,10 @@ El código de fábrica que traían los rovers está respaldado en [`rover_origin
 
 ## Qué falta (TODO) antes de correr en el robot completo
 
-- `config.py`: `VISION_HOST` (IP de la PC de visión); ID, color y MAC de cada rover ya se autodetectan por MAC.
+- `config.py`: `VISION_HOST` (IP de la PC de visión). ID y MAC de cada rover ya se autodetectan por MAC.
 - Calibración de motores (`motores.py`, factores por motor).
 - Sensor de agarre: hoy es solo el ultrasónico (`sensores.py`); calibrar `DISTANCIA_AGARRE_CM`.
-- Control de rumbo con PID (`movimiento.py`) y maniobra de agarre/entrega.
+- Calibrar con el robot real los números de `comun/planificador.py` y la velocidad/giro de los motores (el control actual es proporcional de rumbo, sin PID).
 - Negociación robusta rover↔rover (`comun/protocolo_rovers.py`).
 
 ## Despliegue

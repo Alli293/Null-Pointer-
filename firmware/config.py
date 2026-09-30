@@ -7,11 +7,12 @@ Las credenciales WiFi NO van aqui: viven en settings.toml del dispositivo
 
 # --- Identidad de este rover -------------------------------------------------
 # Mismo archivo para los dos rovers: cada uno se reconoce por la MAC de su radio
-# (leida con `wifi.radio.mac_address`). El ID es el del marcador ArUco fisico
+# (leida con `wifi.radio.mac_address`). El reparto de colores sale del ID
+# (comun/protocolo_rovers.asignacion_estatica). El ID es el del marcador ArUco fisico
 # (diccionario 4X4), decodificado de fotos de los stickers.
 ROVERS = {
-    (224, 140, 254, 37, 199, 72): {"id": 10, "color": "red"},    # rover 1 (COM3 en banco)
-    (224, 140, 254, 39, 166, 120): {"id": 11, "color": "green"},  # rover 2 (COM12 en banco)
+    (224, 140, 254, 37, 199, 72): {"id": 10},    # rover 1 (COM3 en banco)
+    (224, 140, 254, 39, 166, 120): {"id": 11},   # rover 2 (COM12 en banco)
 }
 
 
@@ -25,7 +26,7 @@ def _yo():
 
 _MI_MAC = _yo()
 MI_ARUCO_ID = ROVERS[_MI_MAC]["id"]
-COLOR_INICIAL = ROVERS[_MI_MAC]["color"]  # ver comun/protocolo_rovers.asignacion_estatica
+IDS_ROVERS = sorted(r["id"] for r in ROVERS.values())
 # MAC del OTRO rover, para ESP-NOW.
 MAC_OTRO_ROVER = next(bytes(m) for m in ROVERS if m != _MI_MAC)
 

@@ -1,26 +1,20 @@
-"""Loop principal del rover: conectar, leer telemetria, decidir, actuar.
+"""Loop principal del rover (CircuitPython): leer telemetria, decidir, mover.
 
-Estado actual: esqueleto funcional -- conecta y corre la maquina de estados de
-comun/, pero las acciones de motor concretas dependen de firmware/movimiento.py
-y firmware/sensores.py, que hoy son stubs (ver TODOs ahi) hasta tener el robot
-en banco de pruebas.
+Toda la decision vive en comun.rover.ControladorRover (la misma que prueba el
+simulador de pc_dev/). Aqui solo hay hardware: WiFi, TCP de vision, sensores y
+motores, mas un paro de seguridad.
 """
 
 from firmware import config
 from firmware.comm_vision import ClienteVision
-from firmware.comm_espnow import ComunicacionRovers
-from firmware.movimiento import ControladorMovimiento
+from firmware.motores import Motores
 from firmware.sensores import Sensores
 
 from comun import contrato, mundo
-from comun.maquina_estados import (
-    RoverFSM,
-    ESTADO_APROXIMAR,
-    ESTADO_TRANSPORTAR,
-    ESTADO_SUJETAR,
-    ESTADO_ENTREGAR,
-    ESTADO_DETENIDO,
-)
+from comun.rover import ControladorRover
+
+# Si no llega telemetria valida por mas de esto, se frenan los motores.
+TIMEOUT_TELEMETRIA_MS = 500
 
 
 def conectar_wifi():
@@ -40,55 +34,32 @@ def ahora_ms():
 
 
 def main():
-    conectar_wifi()
+    motores = Motores()
+    motores.detener()
+    try:
+        conectar_wifi()
+        cliente = ClienteVision(config.VISION_HOST, config.VISION_PORT)
+        cliente.conectar()
 
-    cliente_vision = ClienteVision(config.VISION_HOST, config.VISION_PORT)
-    cliente_vision.conectar()
+        sensores = Sensores()
+        estimador = mundo.EstimadorLatencia()
+        ctrl = ControladorRover(config.MI_ARUCO_ID, config.IDS_ROVERS)
+        ultimo_ok = ahora_ms()
 
-    radio_rovers = ComunicacionRovers(config.MAC_OTRO_ROVER)
-    control = ControladorMovimiento()
-    sensores = Sensores()
-    estimador_latencia = mundo.EstimadorLatencia()
-    fsm = RoverFSM(config.MI_ARUCO_ID, config.COLOR_INICIAL)
-
-    while True:
-        msg = cliente_vision.leer_ultimo_mensaje()
-        if msg is None:
-            continue
-
-        if not mundo.mensaje_utilizable(msg, ahora_ms(), estimador_latencia):
-            # Version desconocida, fase que no permite actuar, o latencia
-            # deteriorandose -- por seguridad, no se manda ningun comando nuevo.
-            if msg.get("phase") != contrato.FASE_FINISHED:
-                continue
-
-        estado = fsm.transicion(
-            msg,
-            tiene_cubo=sensores.cubo_sujeto(),
-            cubo_entregado=sensores.cubo_liberado_en_depot(),
-        )
-
-        if estado == ESTADO_DETENIDO:
-            control.detener()
-            continue
-
-        rover = mundo.mi_rover(msg, fsm.mi_id)
-        if rover is None:
-            control.detener()
-            continue
-
-        if estado == ESTADO_APROXIMAR:
-            cubo = mundo.cubo_por_color(msg, fsm.color_asignado)
-            if cubo is not None:
-                control.avanzar_hacia(rover, cubo)
-        elif estado == ESTADO_TRANSPORTAR:
-            depot = mundo.depot_por_color(msg, fsm.color_asignado)
-            if depot is not None:
-                control.avanzar_hacia(rover, depot)
-        elif estado in (ESTADO_SUJETAR, ESTADO_ENTREGAR):
-            control.detener()  # TODO: maniobra de agarre/entrega con las paletas
-        # BUSCAR/OCIOSO: TODO decidir patron de espera/busqueda (p.ej. girar
-        # despacio) en vez de quedarse quieto.
+        while True:
+            msg = cliente.leer_ultimo_mensaje()
+            ahora = ahora_ms()
+            if msg is not None and (
+                mundo.mensaje_utilizable(msg, ahora, estimador)
+                or msg.get("phase") == contrato.FASE_FINISHED
+            ):
+                izq, der = ctrl.paso(msg, tiene_cubo=sensores.cubo_sujeto())
+                motores.mover(izq, der)
+                ultimo_ok = ahora
+            elif ahora - ultimo_ok > TIMEOUT_TELEMETRIA_MS:
+                motores.detener()
+    finally:
+        motores.detener()  # cualquier error o Ctrl-C deja los motores frenados
 
 
 if __name__ == "__main__":
