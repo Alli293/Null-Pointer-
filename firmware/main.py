@@ -37,14 +37,19 @@ def main():
     motores = Motores()
     motores.detener()
     try:
+        if not config.VISION_HOST:
+            raise RuntimeError("Falta VISION_HOST en settings.toml del dispositivo")
+        print("rover", config.MI_ARUCO_ID, "conectando WiFi...")
         conectar_wifi()
         cliente = ClienteVision(config.VISION_HOST, config.VISION_PORT)
         cliente.conectar()
+        print("conectado a vision", config.VISION_HOST, config.VISION_PORT)
 
         sensores = Sensores()
         estimador = mundo.EstimadorLatencia()
         ctrl = ControladorRover(config.MI_ARUCO_ID, config.IDS_ROVERS)
         ultimo_ok = ahora_ms()
+        estado_previo = None
 
         while True:
             msg = cliente.leer_ultimo_mensaje()
@@ -56,6 +61,9 @@ def main():
                 izq, der = ctrl.paso(msg, tiene_cubo=sensores.cubo_sujeto())
                 motores.mover(izq, der)
                 ultimo_ok = ahora
+                if ctrl.estado != estado_previo:
+                    print(msg.get("phase"), ctrl.estado, ctrl.fsm.color_asignado)
+                    estado_previo = ctrl.estado
             elif ahora - ultimo_ok > TIMEOUT_TELEMETRIA_MS:
                 motores.detener()
     finally:

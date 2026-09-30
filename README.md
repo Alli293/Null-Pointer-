@@ -1,44 +1,385 @@
-# Null-Pointer- — Vision Rover Challenge
+# Null-Pointer — Vision Rover Challenge
 
 Proyecto del equipo para el [Vision Rover Challenge](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge)
-de Cenfotec: dos CenfoBot (ESP32) deben ubicar, transportar y depositar cubos de color
-en su zona correspondiente, coordinándose entre sí, guiados por un sistema de visión
-externo que **solo da percepción** (posiciones/orientación) — toda la estrategia y
-decisión corre a bordo de los rovers, sin PC externa durante la ronda.
+de Cenfotec: dos CenfoBot (IdeaBoard ESP32, **CircuitPython**) deben ubicar, transportar y
+depositar cubos de color en su zona, coordinándose entre sí, guiados por un sistema de
+visión externo que **solo da percepción** (posición y orientación). Toda la decisión corre
+a bordo de los rovers, sin PC externa durante la ronda.
 
-## Cómo se separa el repo
+> **Estado al 30-sep-2026:** la lógica completa está hecha y verificada **en simulación**
+> (57 tests; los 2 rovers entregan los 3 cubos en ~30 s simulados). **Nada corrió todavía
+> en los rovers reales con la cámara.** Lo que sí se probó en hardware: lectura de los
+> rovers por USB, mapeo de motores y mensajes ESP-NOW entre los dos. El plan para dar el
+> salto a la prueba real está en la [sección 7](#7-plan-paso-a-paso-hasta-la-prueba-real).
 
-| Carpeta       | Dónde corre                | Qué contiene |
-|---------------|-----------------------------|--------------|
-| [`comun/`](comun/)       | **PC y ESP32** (mismo código) | Lógica de decisión pura: parseo/validación del contrato de telemetría, emparejamiento cubo↔depot, máquina de estados del rover. Un solo lugar de verdad para que la simulación en PC y el robot real nunca diverjan. |
-| [`firmware/`](firmware/)   | Solo ESP32 (CircuitPython)   | Lo que depende de hardware: motores, sensores, ESP-NOW, cliente TCP de visión. Importa `comun/`. |
-| [`pc_dev/`](pc_dev/)     | Solo PC                    | Herramientas para iterar sin flashear ni tener el robot a mano: cliente de escritorio, runner de simulación, tests (`pytest`). |
-| [`docs/`](docs/)       | —                           | Resumen propio del contrato de telemetría y decisiones de arquitectura. |
-| [`simulacion/`](simulacion/) | —                       | Cómo levantar el publisher simulado del repo guía para probar en vivo sin hardware. |
+## Índice
 
-La idea central: la lógica de decisión (`comun/`) se escribe una sola vez, en un
-subconjunto de Python compatible con CPython y CircuitPython, se prueba con `pytest`
-en la PC, y se copia **sin cambios** al ESP32. Así lo que se validó en simulación es
-literalmente lo que corre en el robot.
+1. [Mapa del repositorio](#1-mapa-del-repositorio)
+2. [Lo que se hizo](#2-lo-que-se-hizo)
+3. [Los rovers: hardware y datos medidos](#3-los-rovers-hardware-y-datos-medidos)
+4. [Cómo nos conectamos a los rovers](#4-cómo-nos-conectamos-a-los-rovers)
+5. [Simulación y tests](#5-simulación-y-tests)
+6. [Lo que falta por hacer](#6-lo-que-falta-por-hacer)
+7. [Plan paso a paso hasta la prueba real](#7-plan-paso-a-paso-hasta-la-prueba-real)
+8. [Problemas conocidos y soluciones](#8-problemas-conocidos-y-soluciones)
+9. [Flujo de trabajo con git](#9-flujo-de-trabajo-con-git)
+10. [Referencias](#10-referencias)
 
-## Quickstart
+---
+
+## 1. Mapa del repositorio
+
+| Carpeta | Dónde corre | Qué contiene |
+|---|---|---|
+| [`comun/`](comun/) | **PC y rover** (mismo código) | Toda la decisión. `contrato.py` (constantes), `mundo.py` (emparejar por identidad, frescura, latencia), `maquina_estados.py` (FSM), `navegacion.py` (geometría y control de rumbo), `planificador.py` (a dónde ir según el estado), `rover.py` (`ControladorRover`: FSM + planificador + reparto de colores + cesión de paso), `protocolo_rovers.py` (mensajes inter-rover y reparto estático). No usa nada que no exista en CircuitPython. |
+| [`firmware/`](firmware/) | Solo rover (CircuitPython) | Lo que toca hardware: `motores.py`, `sensores.py`, `comm_vision.py` (TCP), `comm_espnow.py`, `config.py` (identidad por MAC), `main.py` (loop), `code.py` (punto de entrada), `settings.toml.example`. |
+| [`pc_dev/`](pc_dev/) | Solo PC | `simulador_fisico.py` (lazo cerrado), `ejecutar_simulacion.py` (contra un publisher real/mock), `trazar_simulacion.py` (depuración), `tests/` (pytest). |
+| [`herramientas/`](herramientas/) | PC, habla con los rovers por USB | `info_rover.py`, `respaldar_rover.py`, `probar_motores.py`, `desplegar.py`. Ver [sección 4](#4-cómo-nos-conectamos-a-los-rovers). |
+| [`rover_original/`](rover_original/) | — | Respaldo del contenido de fábrica de cada rover (`rover1/`, `rover2/`). Sirve para restaurarlos. |
+| [`docs/`](docs/) | — | [`contrato_telemetria.md`](docs/contrato_telemetria.md) (protocolo v2) y [`arquitectura.md`](docs/arquitectura.md). |
+| [`simulacion/`](simulacion/) | — | Cómo usar el `mock_publisher` del repo guía. |
+
+**Idea central:** la lógica (`comun/`) se escribe una sola vez, se prueba con `pytest` en la
+PC y se copia **sin cambios** al rover. Lo que funciona en simulación es lo que corre en el robot.
+
+---
+
+## 2. Lo que se hizo
+
+Cronológico, en `develop` (PRs #1 a #5):
+
+1. **Esqueleto inicial** (PR #1): `comun/`, `firmware/`, `pc_dev/`, docs y 24 tests.
+2. **Protocolo de telemetría v2** (PR #2): `clock`, `depot_size`, `cube_side`, `start` distinto del
+   origen, zonas de entrega como rectángulos. La entrega se verifica con la fórmula exacta del
+   contrato (`mundo.cubo_en_su_zona`).
+3. **Migración a CircuitPython** (PR #3): el esqueleto asumía MicroPython, pero los rovers traen
+   **CircuitPython 9.2.4** (IdeaBoard de CRCibernetica). Se reescribió `firmware/` con `ideaboard`,
+   `hcsr04`, `socketpool`/`wifi` y el módulo `espnow`. `comun/` no cambió.
+4. **Identidad por MAC + respaldo del rover 2** (PR #4): un solo `config.py` sirve para los dos
+   rovers; cada uno se reconoce por la MAC de su radio. Los IDs ArUco se decodificaron de fotos
+   de los stickers.
+5. **Navegación, planificador y simulador físico** (PR #5):
+   - Estrategia: el cubo se **empuja** con el frente (entre las paletas). El rover se ubica
+     detrás del cubo (lado opuesto al depot), avanza siguiendo la línea cubo→depot corrigiendo el
+     desvío lateral, suelta cuando la visión confirma el cubo adentro de la zona (con 1 celda de
+     margen), retrocede y pasa al siguiente color. Si el cubo se escapa, lo recupera.
+   - FSM: umbral de agarre realista (6 celdas, no 1: el centro del rover nunca llega tan cerca),
+     entrega por zona, recuperación de cubo perdido.
+   - `ControladorRover.paso(msg, tiene_cubo)` devuelve `(izq, der)`; lo usan igual el firmware y
+     el simulador. No se mueve fuera de la fase `RUNNING`; en `FINISHED` se detiene.
+   - `firmware/main.py`: loop con paro de seguridad (sin telemetría por >500 ms, error o Ctrl-C →
+     motores frenados).
+6. **Herramientas y cabos sueltos** (este PR): scripts en `herramientas/`, `VISION_HOST` leído del
+   `settings.toml`, mensajes de diagnóstico en `main.py`, `ejecutar_simulacion.py` usando el
+   controlador real, este README.
+
+**Hallazgos en hardware real** (ver [sección 3](#3-los-rovers-hardware-y-datos-medidos)):
+los rovers no traían código de coordinación ni de sensores propio (solo el de fábrica de la
+IdeaBoard y pruebas de LED/motores/I2C); `motor_1` es la rueda izquierda y `motor_2` la derecha,
+ambos van hacia adelante con potencia positiva (sin invertir); ESP-NOW funciona en ambos sentidos
+(5 de 5 mensajes, señal de −22 a −31 dBm a corta distancia).
+
+---
+
+## 3. Los rovers: hardware y datos medidos
+
+| | Rover 1 | Rover 2 |
+|---|---|---|
+| Puerto USB (en esta PC) | `COM3` | `COM12` |
+| ID ArUco (sticker) | **10** (diccionario 4X4) | **11** (diccionario 4X4) |
+| MAC (radio WiFi / ESP-NOW) | `E0:8C:FE:25:C7:48` = `(224,140,254,37,199,72)` | `E0:8C:FE:27:A6:78` = `(224,140,254,39,166,120)` |
+| UID placa | `0EC8EF527C84` | `0EC8EF726A87` |
+| Firmware | CircuitPython 9.2.4, IdeaBoard | igual |
+| Colores asignados (estático) | rojo, azul | verde |
+
+> Los números de puerto pueden cambiar si se enchufan en otro orden o en otra PC; lo que
+> identifica a cada rover es la MAC, y `firmware/config.py` la usa.
+
+**Pines (código de fábrica de la IdeaBoard, en `rover_original/`):**
+
+| Función | Pin / detalle |
+|---|---|
+| Motor 1 (**rueda izquierda**) | IO12 / IO14 |
+| Motor 2 (**rueda derecha**) | IO13 / IO15 |
+| Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 |
+| Infrarrojo | IO33 (ojo: el `code.py` de prueba de fábrica usa IO33 para un NeoPixel; confirmar cableado) |
+| LED RGB | NeoPixel integrado (`board.NEOPIXEL`) |
+| IMU | I2C, librería `adafruit_lsm6ds` |
+| Sensor de color | I2C (Qwiic) — **aún sin integrar** |
+
+Librerías ya instaladas en `/lib` de ambos rovers: `ideaboard`, `hcsr04`, `adafruit_motor`,
+`adafruit_lsm6ds`, `neopixel`, `simpleio`, `adafruit_requests`, etc.
+
+**Contenido de fábrica:** `code.py` (prueba del LED), `prueba.py` (LED + motores + I2C, idéntico
+en ambos) y `examples/`. El `code.py` del rover 2 era solo `print('standby, sin wifi')` con un
+bucle infinito (por eso `mpremote` no podía entrar sin Ctrl-C).
+
+---
+
+## 4. Cómo nos conectamos a los rovers
+
+Desde la sesión de Claude Code (y desde cualquier terminal) se habla con los rovers **por el
+cable USB**, sin Thonny, con **`mpremote`**, la herramienta oficial de MicroPython/CircuitPython.
+Claude Code corre los comandos en la terminal de la PC; no hay nada "mágico".
+
+### Preparación (una vez por PC)
 
 ```bash
-# 1. Instalar dependencias de PC (solo pytest — el cliente usa socket/json de la librería estándar)
-pip install -r pc_dev/requirements.txt
-
-# 2. Correr los tests de la lógica de decisión (sin hardware, sin red)
-cd pc_dev
-pytest
-
-# 3. Probar contra telemetría simulada (ver simulacion/README.md para levantar el publisher)
-python ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10 --color green
+pip install --user mpremote            # trae pyserial
+python -m mpremote connect list        # lista los puertos (COM3, COM12...)
 ```
 
-Para flashear el firmware a un CenfoBot, ver [`firmware/README.md`](firmware/README.md).
+Siempre `python -m mpremote ...` (no `mpremote`): el ejecutable queda en una carpeta fuera del
+PATH (ver [problemas conocidos](#8-problemas-conocidos-y-soluciones)).
 
-## Referencias
+**Reglas:** cerrar Thonny (un puerto no se comparte); conectar el rover por USB; para mover
+motores hace falta además encender su batería de motores (el USB solo alimenta la lógica).
 
-- Repo guía del reto (reglas, specs del robot, sistema de visión): [Vision-Rover-Challenge](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge)
-- Detalle del protocolo de telemetría (resumen propio): [`docs/contrato_telemetria.md`](docs/contrato_telemetria.md)
-- Decisiones de arquitectura y diagrama de capas: [`docs/arquitectura.md`](docs/arquitectura.md)
+### Herramientas del repo (`herramientas/`)
+
+| Herramienta | Qué hace | ¿Mueve algo? |
+|---|---|---|
+| `python herramientas/info_rover.py` | Lista los rovers conectados y muestra versión, UID y MAC | No (solo lectura) |
+| `python herramientas/respaldar_rover.py COM3 rover1` | Copia los archivos propios del rover a `rover_original/rover1/` | No (solo lectura) |
+| `python herramientas/probar_motores.py COM3 --ruedas-en-el-aire` | Gira cada motor 1.5 s al 40 %, uno por uno | **Sí: levantar el rover y encender baterías.** Se niega a correr sin el flag |
+| `python herramientas/desplegar.py COM3` | Muestra qué archivos copiaría | No (simulación) |
+| `python herramientas/desplegar.py COM3 --si` | Copia `comun/` + `firmware/` y **reemplaza `/code.py`** | Escribe en el rover (respaldar antes) |
+
+### Comandos sueltos útiles
+
+```bash
+# Ejecutar código en el rover desde RAM (no guarda nada). Si falla con "could not enter raw repl",
+# el rover está en un bucle: mandarle Ctrl-C primero (las herramientas del repo ya lo hacen).
+python -m mpremote connect COM3 exec "import wifi; print(list(wifi.radio.mac_address))"
+
+# Copiar un archivo hacia / desde el rover
+python -m mpremote connect COM3 fs cp firmware/config.py :firmware/config.py
+python -m mpremote connect COM3 fs cp :/code.py code_respaldo.py
+
+# Consola en vivo (ver los print del firmware). Salir con Ctrl-]
+python -m mpremote connect COM3 repl
+```
+
+### Lo que hizo Claude en esta sesión con los rovers
+
+1. `mpremote connect list` → encontró `COM3` y `COM12` (chip CH340).
+2. Identificó el firmware (`sys.implementation` → CircuitPython, no MicroPython).
+3. Listó el sistema de archivos y **respaldó** los archivos propios en `rover_original/`
+   (solo lectura).
+4. Leyó la MAC de cada radio (`wifi.radio.mac_address`).
+5. **Probó motores** uno por uno desde RAM (40 %, 1.5 s, con `try/finally` que frena siempre)
+   con el rover levantado y la persona confirmando qué rueda giró.
+6. **Probó ESP-NOW** desde RAM: un rover escucha 12 s y el otro manda 5 mensajes; luego al revés.
+7. **No** subió nada al rover ni tocó sus `code.py`. El firmware todavía no está desplegado.
+
+> CircuitPython **recarga solo** al guardar archivos en el rover y arranca `code.py` al
+> encender/reiniciar. Al desplegar, el rover empieza a ejecutar el firmware apenas se
+> reinicia: tener las ruedas en el aire y `VISION_HOST` configurado (si falta, el firmware
+> aborta con un mensaje y deja los motores frenados).
+
+---
+
+## 5. Simulación y tests
+
+```bash
+pip install -r pc_dev/requirements.txt     # solo pytest
+cd pc_dev
+python -m pytest -q                        # 57 tests, ~2 s, sin hardware ni red
+```
+
+- `tests/test_ciclo_completo.py`: **lazo cerrado** — los 2 rovers entregan los 3 cubos (sin
+  choques; también con ruido de visión de 0.15 y 0.3 celdas), no se mueven fuera de `RUNNING`,
+  se detienen en `FINISHED`.
+- `tests/test_firmware_main.py`: ejecuta `firmware/main.py` en la PC con módulos de hardware
+  falsos (config por MAC, motores, paro seguro, exige `VISION_HOST`).
+- `tests/test_navegacion.py`, `test_maquina_estados.py`, `test_mundo.py`: unidades.
+- `python pc_dev/trazar_simulacion.py [ruido] [segundos]`: imprime los cambios de estado y choques
+  de una corrida, útil para depurar la estrategia.
+
+El simulador físico (`pc_dev/simulador_fisico.py`) es **propio** y simple (círculos que se empujan,
+6 celdas/s y 90°/s a potencia máxima, escenario de `config_simulador.json` del repo guía). No
+reemplaza al `mock_publisher.py` del repo guía: ese publica telemetría realista (ruido,
+oclusiones) pero **no reacciona** a los comandos de los rovers.
+
+---
+
+## 6. Lo que falta por hacer
+
+**Bloqueantes para la prueba real** (van en el plan de la sección 7):
+- [ ] Configurar el WiFi de los rovers (`settings.toml`) y la IP de la PC de visión.
+- [ ] Desplegar el firmware a los rovers y verlos conectarse y leer telemetría.
+- [ ] Verificar la cámara y la cancha (marcadores, calibración).
+
+**Calibración en banco/cancha (números hoy inventados por el simulador):**
+- [ ] Velocidad lineal y de giro reales de cada rover vs. potencia (el simulador asume 6 celdas/s
+  y 90°/s). Hay que calibrar la diferencia entre los dos motores (factores en `motores.py`) y
+  la **potencia mínima** a la que las ruedas realmente arrancan.
+- [ ] `DISTANCIA_AGARRE_CM` (hoy 4 cm, inventado) y dónde apunta el ultrasónico.
+- [ ] Constantes de `comun/planificador.py` (distancias de preagarre, rodeo, velocidades) y
+  umbrales de `comun/maquina_estados.py`.
+- [ ] Offset entre el centro del marcador ArUco y el centro real del chasis (el repo guía trae
+  `vision/mediciones/desfases_rover10_*.json`).
+- [ ] Geometría real de las paletas: el modelo asume que el cubo se empuja de frente.
+
+**Sensores:**
+- [ ] Integrar el sensor de color (I2C) para confirmar agarre/entrega; hoy solo hay ultrasónico.
+- [ ] Confirmar el cableado del infrarrojo (conflicto de IO33 con el NeoPixel de prueba).
+- [ ] Usar la IMU (giroscopio) para mantener rumbo entre cuadros de visión (20 Hz). El control
+  actual es proporcional sobre el `theta` de la visión, sin PID.
+
+**Lo complicado, dejado para el final a propósito:**
+- [ ] **Negociación rover↔rover por ESP-NOW** (`comun/protocolo_rovers.py`, `firmware/comm_espnow.py`):
+  hoy el reparto de colores es **estático por ID** (rover 10: rojo y azul; rover 11: verde) y
+  el firmware ya puede enviar/recibir (probado) pero `main.py` **no lo usa todavía**.
+  Falta: reclamar/liberar colores tolerando mensajes perdidos, reasignación dinámica (que un
+  rover ayude al otro cuando termina), confirmar recolección/entrega.
+- [ ] **Evitación de colisiones robusta.** Hoy: el rover de ID mayor cede el paso y se aparta, el
+  de ID menor frena de emergencia; con ruido alto quedan roces ocasionales (≤2 por corrida en el
+  simulador). Un campo de repulsión está implementado (`navegacion.repulsion`) pero apagado
+  (`ganancia_repulsion=0`) porque empeoraba el empuje.
+- [ ] Información imperfecta: hoy un cubo no fresco manda al rover a `BUSCAR` (quieto); falta un
+  patrón de búsqueda y navegar hacia la última posición conocida.
+- [ ] Botón de arranque de la IdeaBoard (hoy arranca solo al ver fase `RUNNING`).
+- [ ] Obstáculos (el campo existe en el contrato pero la primera edición va vacío).
+
+---
+
+## 7. Plan paso a paso hasta la prueba real
+
+Orden pensado para que **cada paso valide una sola cosa** y no se arriesgue el robot antes de
+tiempo. No saltar pasos. Las ruedas en el aire son obligatorias hasta el paso 9.
+
+### Fase A — Sistema de visión y cámara (solo PC, sin rovers)
+
+Guías completas en el repo guía: `vision-system/MONTAJE.md`, `PUESTA_A_PUNTO.md`, `OPERACION.md`.
+
+1. **Clonar e instalar el sistema de visión** (Python ≥ 3.10):
+   ```bash
+   git clone https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge.git ../Vision-Rover-Challenge
+   cd ../Vision-Rover-Challenge/vision-system
+   python -m venv .venv
+   .venv\Scripts\python -m pip install -r vision/requirements.txt      # Windows
+   ```
+2. **Comprobar la instalación** (no usa la cámara). Debe terminar en `RESULTADO GENERAL: TODO OK`:
+   ```bash
+   .venv\Scripts\python -m vision.tools.verificar_geometria
+   ```
+3. **Probar el contrato sin cámara**: `python contrato/mock_publisher.py` en una terminal y
+   `python contrato/test_client.py` en otra (no requiere el venv).
+4. **Montar la cancha** (`MONTAJE.md`): los 4 marcadores de esquina (IDs 0–3) pegados con su margen
+   blanco; los rovers con sus stickers (**10 y 11**, ya puestos); los cubos rojo/verde/azul.
+5. **Elegir la cámara**: `.venv\Scripts\python -m vision.tools.diagnostico_camara --listar` y luego
+   sin `--listar` para **mirar la imagen** (el índice no coincide con el orden del nombre). Anotar el
+   índice; si no es 0, usar `--indice N` en los comandos siguientes.
+6. **Calibrar la cámara** (`PUESTA_A_PUNTO.md`, necesita imprimir el patrón, regla y cartón). Si el
+   repo ya trae un perfil para tu modelo (`vision/calibraciones/logitech_c270.json`,
+   `argomtech_cam40.json`), se puede usar ese.
+7. **Vista en vivo**: `.venv\Scripts\python -m vision.sistema --ventana` y comprobar mirando
+   (`MONTAJE.md` §6): los 4 marcadores detectados; el origen en el marcador 0; `col` aumenta hacia la
+   derecha y `row` hacia abajo (si no, los marcadores están en orden antihorario); la grilla
+   dibujada cae sobre la cuadrícula; las zonas (verde arriba, roja derecha, azul abajo) y la salida
+   (centro del lado izquierdo) están donde la organización espera.
+8. **Ver que los rovers se detectan**: poner un rover en la cancha y confirmar en la ventana los IDs
+   10 y 11 con su flecha de orientación. Mover uno hacia la derecha y comprobar que `col` sube;
+   girarlo antihorario y comprobar que `theta` sube. Con `python contrato/test_client.py` se ve el
+   mensaje v2 real.
+
+### Fase B — Rover con ruedas en el aire, telemetría simulada
+
+9. **Red**: la PC y los rovers deben estar en la **misma red WiFi de 2.4 GHz** (el ESP32 no usa 5 GHz).
+   Averiguar la IP de la PC (`ipconfig`) y **permitir el puerto 2026** en el firewall de Windows.
+   Levantar el `mock_publisher.py` (escucha en `0.0.0.0:2026`).
+10. **Probar el controlador en la PC contra el mock** (sin rover):
+    ```bash
+    python pc_dev/ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10
+    ```
+    Debe mostrar estados y ruedas `(izq, der)`. (El mock no reacciona a las ruedas: es solo para ver
+    la decisión.)
+11. **`settings.toml` en cada rover** (copiar `firmware/settings.toml.example` y completar con el WiFi
+    real y `VISION_HOST` = IP de la PC). Se copia con
+    `python -m mpremote connect COM3 fs cp settings.toml :settings.toml`. **No subirlo al repo**
+    (está en `.gitignore`).
+12. **Respaldar y desplegar** el rover 1 (un rover primero):
+    ```bash
+    python herramientas/respaldar_rover.py COM3 rover1      # ya hecho, repetir si hay dudas
+    python herramientas/desplegar.py COM3                    # revisar la lista
+    python herramientas/desplegar.py COM3 --si
+    ```
+13. **Ver el arranque**: con el rover **levantado (ruedas en el aire)**, reiniciarlo y abrir
+    `python -m mpremote connect COM3 repl`. Debe imprimir `rover 10 conectando WiFi...` y
+    `conectado a vision <IP> 2026`, y después, al cambiar la fase, los estados
+    (`READY`/`RUNNING` + estado). Si aborta, el mensaje dice por qué (p. ej. falta `VISION_HOST`).
+14. **Con la cámara real, rover levantado**: en la ventana de visión dar `r` (ready); tras la
+    preparación (1 min por defecto, configurable en `vision/config_vision.json`, bloque `ronda`) pasa a
+    `RUNNING` solo. Verificar que las ruedas reaccionan coherentemente: poner un cubo, y ver que el
+    rover intenta girar hacia donde está (mover el rover a mano no cambia nada; el objetivo es ver el
+    sentido de giro). Comprobar que `f` (stop) o `FINISHED` **frena** las ruedas.
+15. **Repetir 12–14 con el rover 2** (`COM12`).
+
+### Fase C — Calibración con los rovers
+
+16. **Potencia mínima y velocidad**: con el rover en el suelo y un espacio libre, medir cuánta potencia
+    hace falta para arrancar y cuánto avanza por segundo a 0.5, 0.7 y 1.0; y cuánto gira por segundo
+    en el sitio. Ajustar `_factor_izq/_factor_der` en `motores.py` hasta que avance recto y actualizar
+    las constantes del simulador (`VEL_MAX`, `GIRO_MAX`) con lo medido.
+17. **Offset del marcador**: comparar la posición que reporta la visión con la del chasis
+    (`vision/mediciones/desfases_*.json`).
+18. **Agarre**: con un cubo delante, leer el ultrasónico (`python -m mpremote connect COM3 exec ...`
+    con `hcsr04`) a distintas distancias y fijar `DISTANCIA_AGARRE_CM`.
+
+### Fase D — Prueba real en cancha (escalonada)
+
+19. **Un rover, un cubo, sin el otro** (el otro apagado o fuera). Cubo cerca y depot cercano.
+    Cronómetro y mano sobre el botón de apagado. Esperado: aproxima, empuja, entrega, retrocede.
+    Anotar qué falla (agarre, giro, cubo que se escapa) y ajustar constantes en `planificador.py`.
+    Reproducir el fallo en `simulador_fisico.py` si es posible, arreglar, correr `pytest`, redesplegar.
+20. **Un rover, su cola completa** (rover 1: rojo y azul).
+21. **Los dos rovers, cada uno con su color**, cubos lejos entre sí (sin cruces).
+22. **Escenario completo** (config del repo guía: 3 cubos, salida a la izquierda) y medir el tiempo con
+    el cronómetro oficial de la visión (`vision/actas/` guarda un acta por ronda).
+
+### Fase E — Lo complicado
+
+23. Negociación por ESP-NOW y reasignación dinámica; evitación de colisiones robusta; búsqueda de
+    cubos ocluidos; usar la IMU. Cada uno con tests en el simulador **antes** de ir al robot.
+
+---
+
+## 8. Problemas conocidos y soluciones
+
+| Síntoma | Causa y solución |
+|---|---|
+| `python` abre la Microsoft Store o "no está instalado" | Alias de ejecución de la Store intercepta `python.exe`. Desactivar los alias de `python.exe`/`python3.exe` en Configuración → Aplicaciones → Alias de ejecución, o llamar al intérprete real por ruta completa. |
+| `pip install mpremote` falla con `WinError 2 ... pyserial-miniterm.exe.deleteme` | Sin permisos en `C:\Python312\Scripts`. Usar `pip install --user mpremote` y ejecutarlo como `python -m mpremote`. |
+| `mpremote` → `could not enter raw repl` | El rover está corriendo un `code.py` con bucle infinito. Mandar Ctrl-C por serial (las herramientas del repo lo hacen solas). |
+| `mpremote` no ve el puerto / "access denied" | Thonny u otro programa tiene el puerto abierto. Cerrarlo. |
+| `git clone` falla con `Filename too long` | Clonar en una ruta corta, p. ej. `C:\Users\<usuario>\Documents\Null-Pointer`. |
+| `fs ls` de mpremote da error `ilistdir` | CircuitPython no lo soporta; listar con `os.listdir` vía `exec` (lo hace `respaldar_rover.py`). |
+| En el ESP-NOW de CircuitPython, `e.send(...)` devuelve falsy aunque el mensaje llegó | Es normal: el valor no indica éxito. Verificar del lado receptor. |
+| El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover. |
+| `RuntimeError: MAC desconocida` al arrancar | Una placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py`. |
+| El rover no conecta al WiFi | Red de 5 GHz (usar 2.4), SSID/clave mal escritos en `settings.toml`, o PC en otra red. |
+| El rover conecta pero no recibe telemetría | Firewall de Windows bloqueando el puerto 2026 en la PC de visión, o IP equivocada. |
+
+---
+
+## 9. Flujo de trabajo con git
+
+- `main`: vacía a propósito por ahora (solo el commit inicial). **No hay PR a `main` todavía** —
+  se hará cuando el equipo decida una versión estable.
+- `develop`: rama de integración; todo entra por PR (PRs #1–#5 ya fusionados).
+- Ramas de trabajo: `feat/...`, `fix/...`, `chore/...`, siempre contra `develop`.
+- Commits con `Co-Authored-By` cuando los escribe Claude Code.
+- El `settings.toml` de los rovers (WiFi) está en `.gitignore`: **no subirlo**.
+
+---
+
+## 10. Referencias
+
+- Repo guía del reto (reglas, specs, sistema de visión): [Vision-Rover-Challenge](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge)
+  — `el_reto.md`, `robot.md`, `reglamento.md`, `vision-system/contrato/CONTRATO.md`, `codigos/` (ejemplos de
+  PID, IMU, color, ESP-NOW que aún no adaptamos).
+- Protocolo de telemetría (resumen propio): [`docs/contrato_telemetria.md`](docs/contrato_telemetria.md)
+- Arquitectura y decisiones: [`docs/arquitectura.md`](docs/arquitectura.md)
+- Firmware y despliegue: [`firmware/README.md`](firmware/README.md)
+- Simulación: [`simulacion/README.md`](simulacion/README.md)

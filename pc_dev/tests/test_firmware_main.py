@@ -97,7 +97,7 @@ def test_config_identifica_al_rover_por_mac(monkeypatch):
 
 
 def test_main_mueve_los_motores_y_termina_frenado(monkeypatch):
-    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y"}
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
     monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
     motores, cola = _instalar_fakes(monkeypatch, MundoSim(), 60)
     main = importlib.import_module("firmware.main")
@@ -110,7 +110,7 @@ def test_main_mueve_los_motores_y_termina_frenado(monkeypatch):
 
 
 def test_main_no_mueve_en_fase_ready(monkeypatch):
-    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y"}
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
     monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
     sim = MundoSim()
     sim_msg = sim.mensaje
@@ -120,3 +120,12 @@ def test_main_no_mueve_en_fase_ready(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         main.main()
     assert all(abs(v) < 1e-9 for v in motores[1].historial + motores[2].historial)
+
+
+def test_main_exige_vision_host(monkeypatch):
+    monkeypatch.setattr("os.getenv", lambda k, d=None: None)
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 5)
+    main = importlib.import_module("firmware.main")
+    with pytest.raises(RuntimeError, match="VISION_HOST"):
+        main.main()
+    assert motores[1].throttle == 0.0 and motores[2].throttle == 0.0

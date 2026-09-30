@@ -31,8 +31,13 @@ IDS_ROVERS = sorted(r["id"] for r in ROVERS.values())
 MAC_OTRO_ROVER = next(bytes(m) for m in ROVERS if m != _MI_MAC)
 
 # --- Red ---------------------------------------------------------------------
-VISION_HOST = "TODO"      # IP de la PC con el sistema de vision (nunca 127.0.0.1)
-VISION_PORT = 2026
+# IP de la PC con el sistema de vision (nunca 127.0.0.1) y su puerto. Se leen del
+# settings.toml del dispositivo (ver firmware/settings.toml.example) para no
+# reflashear codigo cada vez que cambia la red.
+import os
+
+VISION_HOST = os.getenv("VISION_HOST")
+VISION_PORT = os.getenv("VISION_PORT") or 2026
 
 # --- Motores (IdeaBoard: motor_1 = IO12/IO14, motor_2 = IO13/IO15) -----------
 MOTOR_IZQ = 1             # TODO: confirmar cual motor es el izquierdo en el chasis
