@@ -7,10 +7,13 @@ visión externo que **solo da percepción** (posición y orientación). Toda la 
 a bordo de los rovers, sin PC externa durante la ronda.
 
 > **Estado al 30-sep-2026:** la lógica completa está hecha y verificada **en simulación**
-> (57 tests; los 2 rovers entregan los 3 cubos en ~30 s simulados). **Nada corrió todavía
-> en los rovers reales con la cámara.** Lo que sí se probó en hardware: lectura de los
-> rovers por USB, mapeo de motores y mensajes ESP-NOW entre los dos. El plan para dar el
-> salto a la prueba real está en la [sección 7](#7-plan-paso-a-paso-hasta-la-prueba-real).
+> (63 tests; los 2 rovers entregan los 3 cubos en ~30 s simulados). **Probado en hardware real:**
+> lectura de los rovers por USB, mapeo de motores, mensajes ESP-NOW entre los dos, **la cámara
+> (Fase A completa: marcadores, ejes, zonas, detección de los rovers 10 y 11 con su `theta`)** y
+> **los dos rovers conectados por WiFi (`Visitas`) a la telemetría real de la visión**.
+> **Todavía no se ha probado:** ningún movimiento de ruedas con el firmware completo (ni con las
+> ruedas en el aire). Estado detallado y lo pendiente al final de la [Fase B](#fase-b--rover-con-ruedas-en-el-aire-telemetría-simulada);
+> el plan completo está en la [sección 7](#7-plan-paso-a-paso-hasta-la-prueba-real).
 
 ## Índice
 
@@ -102,7 +105,8 @@ ambos van hacia adelante con potencia positiva (sin invertir); ESP-NOW funciona 
 | Motor 1 (**rueda izquierda**) | IO12 / IO14 |
 | Motor 2 (**rueda derecha**) | IO13 / IO15 |
 | Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 |
-| Infrarrojo | IO33 (ojo: el `code.py` de prueba de fábrica usa IO33 para un NeoPixel; confirmar cableado) |
+| **LED de estado (NeoPixel)** | **IO33**, orden de colores GRB. Medido en el rover 1. El `board.NEOPIXEL` de la IdeaBoard (IO2) **no muestra nada** en estos rovers. Rover 2: pendiente de confirmar |
+| Infrarrojo | El ejemplo de fábrica lo pone en IO33, pero ese pin es el del LED: **no se usa** (`PIN_IR = None`; no interviene en la lógica) |
 | LED RGB | NeoPixel integrado (`board.NEOPIXEL`) |
 | IMU | I2C, librería `adafruit_lsm6ds` |
 | Sensor de color | I2C (Qwiic) — **aún sin integrar** |
@@ -143,7 +147,8 @@ motores hace falta además encender su batería de motores (el USB solo alimenta
 | `python herramientas/respaldar_rover.py COM3 rover1` | Copia los archivos propios del rover a `rover_original/rover1/` | No (solo lectura) |
 | `python herramientas/probar_motores.py COM3 --ruedas-en-el-aire` | Gira cada motor 1.5 s al 40 %, uno por uno | **Sí: levantar el rover y encender baterías.** Se niega a correr sin el flag |
 | `python herramientas/desplegar.py COM3` | Muestra qué archivos copiaría | No (simulación) |
-| `python herramientas/desplegar.py COM3 --si` | Copia `comun/` + `firmware/` y **reemplaza `/code.py`** | Escribe en el rover (respaldar antes) |
+| `python herramientas/desplegar.py COM3 --si` | Copia `comun/` + `firmware/` y **reemplaza `/code.py`** | Escribe en el rover (respaldar antes). Si el cable se suelta a la mitad, el rover queda con archivos mezclados: **repetir el despliegue completo** |
+| `python herramientas/probar_led.py COM12` | Recorre los estados del LED (4 s cada uno) para verlos con los ojos; `--segundos`, `--estados a,b` | No mueve motores; interrumpe el firmware (reiniciar el rover después) |
 
 ### Comandos sueltos útiles
 
@@ -180,22 +185,33 @@ python -m mpremote connect COM3 repl
 ### Sin cable USB: indicador LED
 
 Para las pruebas en el suelo los rovers van **sin cable a la PC** (autonomía del reto, y el cable se
-enreda). Sin USB no hay REPL ni `print`, así que el LED RGB de la placa dice qué hace el rover
-(`firmware/indicador.py`):
+enreda). Sin USB no hay REPL ni `print`, así que un LED dice qué hace el rover
+(`firmware/indicador.py`).
 
-| Color del LED | Significa |
+**Medido en los rovers (30-sep-2026):** el LED que responde es un **NeoPixel en IO33**, con orden de colores
+**GRB**. El `board.NEOPIXEL` de la IdeaBoard (IO2) no muestra nada. Además, en el LED del rover 1 el **rojo
+mezclado con otros colores se pierde** (se vio rojo puro, pero no amarillo/magenta/rosa), así que la paleta usa
+solo **verde, azul, cian, blanco y rojo puro**: cada familia de color dice una cosa y el **parpadeo** dice la etapa.
+
+| LED | Significa |
 |---|---|
-| 🟡 Amarillo | Arrancando: conectando al WiFi / a la visión |
-| 🔵 Azul tenue | Conectado a la visión, esperando que la ronda pase a `RUNNING` (no se mueve) |
-| 🟣 Violeta | `BUSCAR` (sin cubo fresco que atender) |
-| 🔵 Azul fuerte | `APROXIMAR` (yendo a ubicarse detrás del cubo) |
-| 🟪 Magenta | `SUJETAR` (empujando hasta confirmar que lleva el cubo) |
-| 🟢 Verde | `TRANSPORTAR` (empujando el cubo al depot) |
-| 🩵 Cian | `ENTREGAR` (soltó el cubo, retrocede) |
-| ⚪ Blanco | `OCIOSO` (terminó su cola de colores) |
-| 🌸 Rosa | `DETENIDO` (ronda terminada, `FINISHED`) |
-| 🟠 Naranja | Dejó de llegar telemetría: motores frenados |
-| 🔴 Rojo | **Error** (p. ej. falta `VISION_HOST` en `settings.toml`): motores frenados. Conectar el USB y ver el mensaje con `mpremote ... repl` |
+| 🔵 Azul **parpadeo rápido** | Conectando al WiFi / a la visión |
+| 🔵 Azul **fijo** | Conectado; esperando que la ronda pase a `RUNNING` (**no se mueve**) |
+| 🟢 Verde **lento** | `APROXIMAR` (yendo a ubicarse detrás del cubo) |
+| 🟢 Verde **rápido** | `SUJETAR` (empujando hasta confirmar que lleva el cubo) |
+| 🟢 Verde **fijo** | `TRANSPORTAR` (empujando el cubo al depot) |
+| 🩵 Cian **fijo** | `ENTREGAR` (soltó el cubo, retrocede) |
+| 🩵 Cian **lento** | `BUSCAR` (sin cubo fresco que atender) |
+| ⚪ Blanco **fijo** | `OCIOSO` (terminó su cola de colores) |
+| ⚪ Blanco **lento** | `DETENIDO` (ronda terminada, `FINISHED`) |
+| 🔴 Rojo **lento** | Dejó de llegar telemetría: motores frenados |
+| 🔴 Rojo **fijo** | **Error** (p. ej. falta `VISION_HOST` en `settings.toml`): motores frenados. Conectar el USB y ver el mensaje con `mpremote ... repl` |
+
+Lento = 1 Hz (0.5 s encendido / 0.5 s apagado); rápido = 4 Hz. Al cambiar de estado el LED empieza encendido.
+**Verificación visual:** en el rover 1, con la paleta **anterior** (sin parpadeos), se vieron bien `esperando` (azul),
+`error` (rojo), `BUSCAR` (morado), `APROXIMAR` (azul) y `OCIOSO` (blanco); en los estados que mezclan rojo se vieron
+menos de los esperados, y de ahí salió la paleta nueva. **La paleta nueva con parpadeos todavía no se ha visto
+con los ojos**: correr `python herramientas/probar_led.py <PUERTO>` en cada rover para confirmarla.
 
 Antes de quitar el cable: confirmar que la placa **enciende con las baterías** (hoy no sabemos si la
 batería de motores también alimenta la lógica), que `settings.toml` está copiado y que las ruedas
@@ -250,7 +266,8 @@ oclusiones) pero **no reacciona** a los comandos de los rovers.
 
 **Sensores:**
 - [ ] Integrar el sensor de color (I2C) para confirmar agarre/entrega; hoy solo hay ultrasónico.
-- [ ] Confirmar el cableado del infrarrojo (conflicto de IO33 con el NeoPixel de prueba).
+- [ ] Infrarrojo: hoy **no se usa** (`PIN_IR = None`, IO33 es el LED). Si se cablea uno, elegir otro pin.
+- [ ] Confirmar el pin del LED en el rover 2 y la paleta nueva en ambos (`herramientas/probar_led.py`).
 - [ ] Usar la IMU (giroscopio) para mantener rumbo entre cuadros de visión (20 Hz). El control
   actual es proporcional sobre el `theta` de la visión, sin PID.
 
@@ -460,13 +477,36 @@ superficie), tijeras. Los PDF ya están generados en [`calibracion/`](calibracio
 - **Red elegida: `Visitas`** (WPA2 con contraseña). El escaneo del rover mostró que el ESP32 solo ve canales 1, 4, 7 y 10
   (**solo 2.4 GHz**, como dice la especificación del chip); la PC va por 5 GHz de la misma red y aun así se ven.
   `Administrativo` también sirve en 2.4 GHz; `ExpoRobots` **no** es una red del reto (nombre visto en el escaneo, el repo guía no lo menciona).
-- **Firmware desplegado en el rover 2** (18 archivos, tamaño verificado). Al reiniciar imprimió
-  `rover 11 conectando WiFi...` y `conectado a vision 192.168.51.119 2026`, y la visión lo listó como cliente
-  (`192.168.51.8`): **misma red, sin aislamiento entre dispositivos**. La IP de la PC de visión (`VISION_HOST`)
-  se obtiene con `ipconfig` y cambia si la PC cambia de red.
+- **Firmware desplegado y conectado a la visión en los DOS rovers** (18 archivos, tamaño verificado). Al reiniciar cada
+  uno imprimió `rover 10|11 conectando WiFi...` y `conectado a vision 192.168.51.119 2026`, y la visión los listó como
+  clientes (`192.168.51.8` y `192.168.50.193`): **misma red, sin aislamiento entre dispositivos**. La IP de la PC de
+  visión (`VISION_HOST`) se obtiene con `ipconfig` y cambia si la PC cambia de red.
 - Las credenciales van **solo** en `firmware/settings.toml` (Git lo ignora). **No** escribirlas en
   `settings.toml.example`, que sí se sube al repo.
-- Pendiente: desplegar el rover 1, probar las fases `READY`/`RUNNING` y las ruedas con el rover levantado.
+- **LED:** se descubrió que el LED real está en **IO33** (no en `board.NEOPIXEL`/IO2) y que el rojo mezclado se
+  pierde; se rehízo la paleta con parpadeos y `PIN_IR = None` para no chocar con IO33 (ver la sección del LED).
+  También se corrigió un error real: `Motores` y `Sensores` creaban cada uno su `IdeaBoard()` y la segunda fallaba
+  en el rover; ahora hay una sola (`firmware/placa.py`) y un test que lo vigila.
+
+**Estado de cada rover al cerrar esta sesión (30-sep-2026):**
+
+| | Rover 1 (ID 10, UID `…7C84`) | Rover 2 (ID 11, UID `…6A87`) |
+|---|---|---|
+| Firmware | Desplegado con la paleta LED nueva (IO33) | ⚠️ **Despliegue interrumpido**: el puerto USB se cayó copiando `comun/navegacion.py`, que pudo quedar truncado. **Hay que repetir `desplegar.py --si`** antes de usarlo |
+| LED | IO33 confirmado (GRB); paleta nueva sin ver aún | **Pin sin confirmar** (se probaron IO2/IO32/IO33 pero no se anotó el resultado); probar con `probar_led.py` después de redesplegar |
+| Telemetría | Conectado a la visión | Conectado a la visión (con el firmware anterior) |
+
+Al final de la sesión **ningún rover aparecía conectado por USB** (`mpremote connect list` vacío); volver a conectarlos.
+
+**Siguientes pasos, en orden:**
+1. Reconectar los rovers y **volver a desplegar el rover 2**; verificar sus 18 archivos.
+2. `probar_led.py` en cada rover: confirmar la paleta nueva y el pin del LED del rover 2 (si no es IO33, probar IO2/IO32
+   uno por uno y ajustar `PIN_LED`; el pin podría ser distinto por rover → tabla por MAC en `config.py`).
+3. **Primera prueba de movimiento, ruedas en el aire**, baterías de motores encendidas, USB conectado, una mano en el
+   interruptor: en la ventana de la visión pulsar `r` (ready); tras 60 s pasa solo a `RUNNING`; el rover 10 debe ir
+   hacia el cubo rojo y el 11 hacia el verde (con `FACTOR_VELOCIDAD = 0.5`). Comprobar el sentido de giro y que `f`
+   (stop) o `FINISHED` **frenan** las ruedas.
+4. Quitar el USB y repetirlo con el LED como única pista; luego pasar a la Fase C (calibración contando cuadros).
 
 9. **Red**: la PC y los rovers deben estar en la **misma red WiFi de 2.4 GHz** (el ESP32 no usa 5 GHz).
    Averiguar la IP de la PC (`ipconfig`) y **permitir el puerto 2026** en el firewall de Windows.

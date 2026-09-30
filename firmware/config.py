@@ -48,9 +48,16 @@ INVERTIR_DER = False
 # --- Sensores ----------------------------------------------------------------
 PIN_ULTRASONICO_TRIG = "IO26"   # ejemplo de fabrica code_ultrasonic.py
 PIN_ULTRASONICO_ECHO = "IO25"
-PIN_IR = "IO33"                 # ejemplo de fabrica code_IR.py (ojo: code.py de
-                                # prueba usa IO33 para un NeoPixel; confirmar cableado)
+PIN_IR = None                   # El infrarrojo NO se usa en la logica y en nuestros rovers IO33
+                                # tiene un NeoPixel (ver PIN_LED). Si se cablea un IR, poner su
+                                # pin aqui (nunca el mismo que PIN_LED).
 DISTANCIA_AGARRE_CM = 4.0       # TODO: calibrar -- cubo "dentro" de las paletas
+
+# --- LED de estado -----------------------------------------------------------
+# Medido en los rovers (prueba de colores, 30-sep-2026): el LED que responde es un
+# NeoPixel en IO33, con orden de colores GRB (el de la libreria por defecto). El
+# `board.NEOPIXEL` de la IdeaBoard (IO2) NO muestra nada en estos rovers.
+PIN_LED = "IO33"
 
 # --- Suavidad ----------------------------------------------------------------
 # Multiplica las velocidades de crucero y de empuje del planificador. Empezar

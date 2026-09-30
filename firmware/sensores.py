@@ -15,11 +15,14 @@ class Sensores:
             getattr(board, config.PIN_ULTRASONICO_TRIG),
             getattr(board, config.PIN_ULTRASONICO_ECHO),
         )
-        self._ir = placa.ideaboard().DigitalIn(getattr(board, config.PIN_IR))
+        # Infrarrojo opcional: solo si config.PIN_IR esta definido (hoy no se usa).
+        self._ir = None
+        if config.PIN_IR:
+            self._ir = placa.ideaboard().DigitalIn(getattr(board, config.PIN_IR))
         self._tenia_cubo = False
 
     def leer_infrarrojo(self):
-        return self._ir.value
+        return None if self._ir is None else self._ir.value
 
     def leer_distancia_ultrasonico_cm(self):
         """Distancia en cm, o None si la lectura falla / no hay eco."""

@@ -31,7 +31,11 @@ class _Motor:
 def _instalar_fakes(monkeypatch, mundo_sim, max_mensajes):
     motores = {1: _Motor(), 2: _Motor()}
     leds = []
+    pines_usados = []
+    pines_led = []
+    motores["pines_led"] = pines_led
     motores["leds"] = leds
+    motores["pines_usados"] = pines_usados
 
     board = types.ModuleType("board")
     board.__getattr__ = lambda nombre: nombre  # board.IO26 -> "IO26"
@@ -50,22 +54,32 @@ def _instalar_fakes(monkeypatch, mundo_sim, max_mensajes):
             if IdeaBoard.instancias > 1:
                 raise RuntimeError("pin in use (IdeaBoard creada dos veces)")
             self.motor_1, self.motor_2 = motores[1], motores[2]
-            self.brightness = 1.0
-            self._pixel = (0, 0, 0)
-
-        @property
-        def pixel(self):
-            return self._pixel
-
-        @pixel.setter
-        def pixel(self, color):
-            self._pixel = color
-            leds.append(color)
 
         def DigitalIn(self, pin, pull=None):
+            pines_usados.append(pin)
             return types.SimpleNamespace(value=False)
 
     ideaboard.IdeaBoard = IdeaBoard
+
+    neopixel = types.ModuleType("neopixel")
+
+    class NeoPixel:
+        """Fake: guarda cada color escrito y falla si el pin ya esta en uso por otro."""
+
+        def __init__(self, pin, n, brightness=1.0, auto_write=True):
+            self.pin = pin
+            pines_led.append(pin)
+            self._c = [(0, 0, 0)] * n
+
+        def __setitem__(self, i, color):
+            self._c[i] = color
+            if color != (0, 0, 0):
+                leds.append(color)
+
+        def __getitem__(self, i):
+            return self._c[i]
+
+    neopixel.NeoPixel = NeoPixel
 
     wifi = types.ModuleType("wifi")
     wifi.radio = types.SimpleNamespace(
@@ -100,7 +114,7 @@ def _instalar_fakes(monkeypatch, mundo_sim, max_mensajes):
     )
 
     for nombre, mod in (("board", board), ("hcsr04", hcsr04), ("ideaboard", ideaboard),
-                        ("wifi", wifi), ("socketpool", socketpool)):
+                        ("neopixel", neopixel), ("wifi", wifi), ("socketpool", socketpool)):
         monkeypatch.setitem(sys.modules, nombre, mod)
     for nombre in [n for n in sys.modules if n == "firmware" or n.startswith("firmware.")]:
         monkeypatch.delitem(sys.modules, nombre)
@@ -174,9 +188,9 @@ def test_led_muestra_conexion_y_estado_del_rover(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         main.main()
     leds = motores["leds"]
-    assert leds[0] == colores["conectando"]
-    assert colores["esperando"] in leds
-    assert colores["APROXIMAR"] in leds  # RUNNING: muestra el estado del FSM
+    assert leds[0] == colores["conectando"][0]
+    assert colores["esperando"][0] in leds
+    assert colores["APROXIMAR"][0] in leds  # RUNNING: muestra el estado del FSM
 
 
 def test_led_rojo_si_falta_la_configuracion(monkeypatch):
@@ -186,4 +200,67 @@ def test_led_rojo_si_falta_la_configuracion(monkeypatch):
     colores = importlib.import_module("firmware.indicador").COLORES
     with pytest.raises(RuntimeError):
         main.main()
-    assert motores["leds"][-1] == colores["error"]
+    assert motores["leds"][-1] == colores["error"][0]
+
+
+def test_led_en_io33_y_sin_choque_con_otros_pines(monkeypatch):
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
+    monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 10)
+    main = importlib.import_module("firmware.main")
+    with pytest.raises(KeyboardInterrupt):
+        main.main()
+    assert motores["pines_led"] == ["IO33"]          # el LED que responde en los rovers
+    assert "IO33" not in motores["pines_usados"]     # ningun otro periferico usa ese pin
+
+
+def test_indicador_parpadeos_con_reloj_falso(monkeypatch):
+    os_env = {"CIRCUITPY_WIFI_SSID": "x", "CIRCUITPY_WIFI_PASSWORD": "y", "VISION_HOST": "127.0.0.1"}
+    monkeypatch.setattr("os.getenv", lambda k, d=None: os_env.get(k, d))
+    motores, _ = _instalar_fakes(monkeypatch, MundoSim(), 1)
+    ind_mod = importlib.import_module("firmware.indicador")
+    t = [100.0]
+    ind = ind_mod.Indicador(reloj=lambda: t[0])
+
+    def color_actual():
+        return ind._np[0]
+
+    # fijo: siempre encendido
+    ind.mostrar("TRANSPORTAR")
+    for dt in (0.0, 0.3, 0.7, 5.0):
+        t[0] = 100.0 + dt
+        ind.actualizar()
+        assert color_actual() == ind_mod.VERDE
+    # lento (1 Hz): encendido 0-0.5 s, apagado 0.5-1.0 s
+    t[0] = 200.0
+    ind.mostrar("APROXIMAR")
+    assert color_actual() == ind_mod.VERDE          # al cambiar, empieza encendido
+    t[0] = 200.6
+    ind.actualizar()
+    assert color_actual() == (0, 0, 0)
+    t[0] = 201.1
+    ind.actualizar()
+    assert color_actual() == ind_mod.VERDE
+    # rapido (4 Hz): encendido 0-0.125 s, apagado 0.125-0.25 s
+    t[0] = 300.0
+    ind.mostrar("SUJETAR")
+    t[0] = 300.2
+    ind.actualizar()
+    assert color_actual() == (0, 0, 0)
+    t[0] = 300.26
+    ind.actualizar()
+    assert color_actual() == ind_mod.VERDE
+
+
+def test_paleta_no_depende_del_rojo_mezclado():
+    # el rojo solo se usa puro (ROJO); ningun otro color lo mezcla con verde/azul salvo el blanco
+    import importlib
+    import sys
+    sys.modules.setdefault("board", __import__("types").ModuleType("board"))
+    sys.modules.setdefault("neopixel", __import__("types").ModuleType("neopixel"))
+    from_mod = importlib.import_module("firmware.indicador")
+    for clave, (color, _) in from_mod.COLORES.items():
+        r, g, b = color
+        assert r == 0 or color in (from_mod.ROJO, from_mod.BLANCO), clave
+    # y todos los estados del FSM y de conexion tienen una senal distinta (color, patron)
+    assert len(set(from_mod.COLORES.values())) == len(from_mod.COLORES)
