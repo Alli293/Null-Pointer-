@@ -101,3 +101,37 @@ def test_asignar_color_reactiva_desde_ocioso():
     fsm.asignar_color("blue")
     assert fsm.estado == ESTADO_BUSCAR
     assert fsm.color_asignado == "blue"
+
+
+# --- Agregados: entrega por zona con margen, cubo perdido --------------------
+
+def _msg_con_cubo(rover_pos, cubo_pos, depot_color="green"):
+    from tests import datos_ejemplo as d
+    msg = d._base(seq=50)
+    msg["rovers"] = [{"id": 10, "col": rover_pos[0], "row": rover_pos[1], "theta": 0, "age_ms": 0}]
+    msg["cubes"] = [{"color": depot_color, "col": cubo_pos[0], "row": cubo_pos[1], "age_ms": 0}]
+    return msg
+
+
+def test_transportar_a_entregar_cuando_cubo_entra_a_la_zona():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR, ESTADO_ENTREGAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    # depot verde en (21.5, 3.75): cubo adentro con margen, rover detras (lejos del centro)
+    assert fsm.transicion(_msg_con_cubo((21.5, 10.0), (21.5, 3.9)), tiene_cubo=True) == ESTADO_ENTREGAR
+
+
+def test_transportar_no_entrega_en_el_borde_de_la_zona():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    # cubo justo en el limite exacto de la zona: sin margen de seguridad no se suelta
+    limite = 21.5 + 5.0 - 3.0 * 1.4142 / 2 - 0.05
+    assert fsm.transicion(_msg_con_cubo((21.5, 12.0), (limite, 4.5)), tiene_cubo=True) == ESTADO_TRANSPORTAR
+
+
+def test_transportar_vuelve_a_aproximar_si_se_pierde_el_cubo():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR, ESTADO_APROXIMAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    assert fsm.transicion(_msg_con_cubo((10.0, 20.0), (25.0, 20.0))) == ESTADO_APROXIMAR

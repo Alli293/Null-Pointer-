@@ -1,5 +1,5 @@
 """Maquina de estados de un rover. Decide QUE hacer segun el mundo; el COMO
-(comandos de motor concretos) vive en firmware/movimiento.py.
+(comandos de rueda) vive en comun/planificador.py.
 
 Ver docs/arquitectura.md para el diagrama de estados y el razonamiento detras de
 cada transicion.
@@ -18,8 +18,19 @@ ESTADO_DETENIDO = "DETENIDO"
 # Umbrales de distancia (en celdas) para considerar que el rover ya esta lo
 # bastante cerca del cubo/depot como para intentar agarrar/soltar. Son un punto de
 # partida -- afinar con pruebas fisicas una vez calibrados los sensores/paletas.
-UMBRAL_AGARRE_CELDAS = 1.0
+#
+# OJO: `col/row` de un rover es el centro de su marcador, y el cubo no puede estar
+# mas cerca que radio del chasis (~3 celdas) + mitad del cubo (~1.5) = ~4.5. Por eso
+# el umbral de agarre es de varias celdas y no de ~1.
+UMBRAL_AGARRE_CELDAS = 6.0
 UMBRAL_ENTREGA_CELDAS = 1.0
+# Si en TRANSPORTAR el cubo queda mas lejos que esto del rover, se escapo: volver a
+# APROXIMAR para recuperarlo.
+UMBRAL_CUBO_PERDIDO_CELDAS = 9.0
+# Para soltar, el cubo debe estar adentro de la zona con este margen extra por
+# lado (celdas): la posicion de vision tiene ruido y en el borde se veria "adentro"
+# sin estarlo. El veredicto oficial (sin margen) se usa para confirmar la entrega.
+MARGEN_ENTREGA_CELDAS = 1.0
 
 
 class RoverFSM:
@@ -91,8 +102,33 @@ class RoverFSM:
                 self.estado = ESTADO_BUSCAR
 
         elif self.estado == ESTADO_TRANSPORTAR:
-            if depot is not None and mundo.distancia(rover, depot) < UMBRAL_ENTREGA_CELDAS:
+            en_zona = (
+                cubo is not None
+                and depot is not None
+                and msg.get("depot_size") is not None
+                and msg.get("cube_side") is not None
+                and msg.get("grid") is not None
+                and mundo.cubo_en_su_zona(
+                    cubo,
+                    depot,
+                    {
+                        "length": msg["depot_size"]["length"] - 2 * MARGEN_ENTREGA_CELDAS,
+                        "depth": msg["depot_size"]["depth"] - 2 * MARGEN_ENTREGA_CELDAS,
+                    },
+                    msg["grid"],
+                    msg["cube_side"],
+                )[0]
+            )
+            if en_zona or (
+                depot is not None and mundo.distancia(rover, depot) < UMBRAL_ENTREGA_CELDAS
+            ):
                 self.estado = ESTADO_ENTREGAR
+            elif (
+                cubo is not None
+                and mundo.es_fresco(cubo)
+                and mundo.distancia(rover, cubo) > UMBRAL_CUBO_PERDIDO_CELDAS
+            ):
+                self.estado = ESTADO_APROXIMAR
 
         elif self.estado == ESTADO_ENTREGAR:
             depot_size = msg.get("depot_size")
@@ -108,6 +144,13 @@ class RoverFSM:
             )
             if cubo_entregado or confirmado_por_vision:
                 self.estado = ESTADO_OCIOSO
+            elif (
+                cubo is not None
+                and mundo.es_fresco(cubo)
+                and mundo.distancia(rover, cubo) > UMBRAL_CUBO_PERDIDO_CELDAS
+            ):
+                # Se solto pero no quedo adentro: ir a empujarlo de nuevo.
+                self.estado = ESTADO_APROXIMAR
 
         # ESTADO_OCIOSO: espera una reasignacion externa (asignar_color) que lo
         # regresa a BUSCAR -- ver comun/protocolo_rovers.py.

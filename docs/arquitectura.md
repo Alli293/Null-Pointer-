@@ -15,6 +15,9 @@
    │    mundo.py            emparejar por identidad, frescura, latencia│
    │    maquina_estados.py  RoverFSM: qué hacer según el mundo         │
    │    protocolo_rovers.py formato de mensaje inter-rover             │
+   │    navegacion.py       geometria + control de rumbo (puro)        │
+   │    planificador.py     a donde ir segun el estado (puro)          │
+   │    rover.py            ControladorRover: FSM+planificador+colores │
    └───────────┬───────────────────────────────────────┬───────────────┘
                │ corre en                              │ corre en
                ▼                                        ▼
@@ -22,7 +25,7 @@
    │  pc_dev/ (solo PC)        │            │  firmware/ (solo ESP32)     │
    │  cliente de escritorio    │            │  comm_vision.py (TCP real)  │
    │  + ejecutar_simulacion.py │            │  comm_espnow.py (rover↔rover)│
-   │  + tests (pytest)         │            │  motores.py / movimiento.py │
+   │  + tests (pytest)         │            │  motores.py / sensores.py   │
    │                           │            │  sensores.py                │
    └───────────────────────────┘            └─────────────────────────────┘
 ```
@@ -66,16 +69,28 @@ Puntos importantes:
   `protocolo_rovers.py`), no necesariamente el fin de la ronda.
 - `DETENIDO` (por `FINISHED`) tiene prioridad sobre cualquier otra transición.
 
-## Qué queda pendiente para la siguiente iteración
+## Lazo de control y simulación
 
-- **Coordinación real entre los dos rovers** (`comun/protocolo_rovers.py`): el
-  esqueleto trae una asignación estática simple (reparto de colores por índice) y el
-  formato de mensaje para reclamar/liberar un color por ESP-NOW, pero no la
-  negociación robusta ante mensajes perdidos (es la parte más delicada del reto:
-  "Imperfect Information Handling" + "Collision Avoidance" del `el_reto.md` del repo
-  guía).
-- **Geometría fina de acercamiento/agarre** (orientación relativa, evasión de
-  obstáculos, corrección con PID) — vive en `firmware/movimiento.py`, fuera de
-  `comun/` a propósito porque depende de las paletas/sensores físicos del kit.
-- **Pines y calibración de motores** — quedan como `TODO` explícitos en
-  `firmware/config.py` hasta tener el robot en banco.
+`comun/rover.py: ControladorRover.paso(msg, tiene_cubo)` recibe telemetría y devuelve
+`(izq, der)` para las ruedas. Lo usan igual `firmware/main.py` y el simulador físico
+`pc_dev/simulador_fisico.py`, que cierra el lazo (mueve rovers, empuja cubos, genera
+telemetría v2). `pytest` verifica que los dos rovers entregan los 3 cubos (~30 s
+simulados, sin choques; también con ruido de visión).
+
+Estrategia: el cubo se **empuja** con el frente (entre las paletas). El rover se ubica
+detrás del cubo (lado opuesto al depot), avanza siguiendo la línea cubo→depot y suelta
+cuando la visión confirma el cubo adentro de la zona (con 1 celda de margen); luego
+retrocede. Si el cubo se escapa, vuelve a recuperarlo.
+
+## Qué queda pendiente
+
+- **Coordinación real entre los dos rovers** (`comun/protocolo_rovers.py`): hoy el
+  reparto de colores es estático (por id) y la evitación de colisiones es una regla
+  simple de cesión de paso (el id mayor cede) — con ruido de visión alto quedan
+  roces ocasionales. Falta la negociación robusta ante mensajes ESP-NOW perdidos,
+  reasignación dinámica (que un rover ayude al otro) y evitación real. Es la parte
+  más delicada del reto ("Imperfect Information Handling" + "Collision Avoidance").
+- **Calibración con el robot real**: los números de `planificador.py` (celdas,
+  velocidades), `DISTANCIA_AGARRE_CM`, y la velocidad/giro reales de los motores
+  (el simulador asume 6 celdas/s y 90°/s a potencia máxima).
+- **Sensor de agarre real**: hoy es el ultrasónico; reforzar con el sensor de color.

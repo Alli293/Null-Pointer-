@@ -25,6 +25,11 @@ class Motores:
         self._izq.throttle = max(-1.0, min(1.0, izq * self._factor_izq))
         self._der.throttle = max(-1.0, min(1.0, der * self._factor_der))
 
+    def mover(self, izq, der):
+        """Comando directo de ruedas, cada una en [-1, 1] (lo que entrega
+        comun.rover.ControladorRover.paso)."""
+        self._aplicar(izq, der)
+
     def avanzar(self, velocidad=1.0):
         self._aplicar(velocidad, velocidad)
 
