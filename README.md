@@ -338,9 +338,30 @@ set PYTHONIOENCODING=utf-8        # en cmd; en PowerShell: $env:PYTHONIOENCODING
 
 **Primer hallazgo con la cámara real:** en la primera imagen solo se veía completo **1 de los 4
 marcadores de esquina** (el ID 2); los otros estaban cortados por el borde o fuera de cuadro, y el
-sistema no publicó coordenadas (rovers y cubos vacíos). **Hay que reubicar la cámara** (más alta o más
-centrada) hasta que la ventana dibuje los 4 marcadores completos.
-**Pasos 4 y 6 a 8 pendientes** (montaje de la cancha, calibración, vista en vivo y ver los rovers).
+sistema no publicó coordenadas (rovers y cubos vacíos). Se reubicó la cámara hasta ver los 4 (ver abajo).
+
+**✅ Pasos 4, 5, 7 y 8 hechos y verificados con la cámara real (30-sep-2026):**
+
+| Comprobación | Resultado |
+|---|---|
+| Los 4 marcadores de esquina | Detectados (`Esquinas 4 de 4`), en **orden horario**: 0 arriba-izquierda, 1 arriba-derecha, 2 abajo-derecha, 3 abajo-izquierda |
+| Zonas y salida | Verde arriba, roja a la derecha, azul abajo, salida al centro del lado izquierdo (donde la organización las espera) |
+| Coordenadas | Contando celdas desde el marcador 0 a mano, el cubo rojo dio col ≈ 20, igual que la visión |
+| Sentido de los ejes | Al mover un cubo a la izquierda y hacia abajo: `col` bajó (34.3 → 23.3) y `row` subió (24.2 → 39.6) ✔ |
+| Veredicto de entrega | Cubo azul en (23.30, 39.57) → la visión lo marcó **EN POSICIÓN**; coincide con `mundo.cubo_en_su_zona` (banda col 18.6–24.4, row 37.6–40.9) |
+| Oclusión | Un cubo tapado (sombra/mano) se quedó con `edad 10100 ms` en naranja: la visión conserva la última posición. Nuestro código lo trata como poco confiable |
+| Rovers 10 y 11 | Ambos detectados, con el marcador hacia arriba y el frente a la derecha: **`theta` 358.4° y 358.7°** (posiciones (4.08, 17.39) y (4.25, 24.76), casi iguales a las de salida del simulador). El frente real del robot **coincide** con el "adelante" del marcador |
+| Sentido del giro | Girados a mirar hacia arriba del tablero: **`theta` 86.9° y 89.4°** → `theta` **sube en sentido antihorario**, como espera `comun/navegacion.py` |
+
+Notas de esta prueba:
+- El sistema procesa a **~10 cuadros por segundo** a 1280x720 (publica a 20 Hz, pero el dato se refresca a 10). El
+  control actual lo tolera; tenerlo en cuenta al calibrar velocidades.
+- Un rover recién puesto tarda ~0.5 s en aparecer (la visión exige 5 cuadros estables) y aparecieron
+  detecciones falsas momentáneas de "rover 10" sobre la cuadrícula con la cancha vacía; se descartan solas.
+- **Solo un programa puede usar la cámara a la vez**: hay que cerrar el sistema de visión (`q` en la ventana)
+  antes de correr `diagnostico_camara`, la calibración o la medición de precisión.
+- Se usó el **perfil de cámara que ya trae el repo** (`logitech_c270`), aceptado como *compatible*. La
+  **calibración propia** (paso 6, `PUESTA_A_PUNTO.md`) está pendiente; ver la guía abajo.
 
 **Qué hay que conseguir / conectar para los pasos 4 a 8** (nada de esto es para conectar los rovers):
 
@@ -389,6 +410,44 @@ centrada) hasta que la ventana dibuje los 4 marcadores completos.
    10 y 11 con su flecha de orientación. Mover uno hacia la derecha y comprobar que `col` sube;
    girarlo antihorario y comprobar que `theta` sube. Con `python contrato/test_client.py` se ve el
    mensaje v2 real.
+
+#### Paso 6 en detalle: calibrar la cámara (`PUESTA_A_PUNTO.md` del repo guía)
+
+Todo lente curva las líneas rectas y eso corre las posiciones que calcula la visión. Se mide cuánto
+curva **nuestra** cámara y se guarda como un perfil propio. Lo que sigue es lo que hay que hacer; el
+detalle y las explicaciones están en `vision-system/PUESTA_A_PUNTO.md`.
+
+> **Regla: el repo guía no se modifica.** La herramienta guarda el perfil en
+> `vision-system/vision/calibraciones/<nombre>.json`. Para no pisar el `logitech_c270.json` que trae el
+> repo, **usar un nombre propio**, p. ej. `"NullPointer C270"`, que crea un archivo nuevo (sin versionar) y
+> no toca ninguno existente. Después, copiar ese JSON a una carpeta de este repo como respaldo.
+
+Materiales: impresora, regla con mm, cartón/cartulina gruesa o tabla lisa, pegamento (en **toda** la
+superficie), tijeras. Los PDF ya están generados en [`calibracion/`](calibracion/):
+`patron.pdf` (3 páginas: 2 del ajedrezado + instrucciones) y `marcador_prueba.pdf` (ID 20, 60 mm).
+
+1. **Imprimir al 100 % de escala** (nunca "ajustar a la página") y **medir con la regla la línea de 100 mm**
+   que trae cada hoja al pie. Si no mide 100 mm, reimprimir: no seguir.
+2. **Armar el patrón**: cortar una hoja por la línea gris, pegar las dos **a tope** (sin escalón ni hueco) y
+   pegar todo sobre cartón rígido, **plano** (cada ondulación se toma como distorsión del lente). Recortar el
+   marcador de prueba **dejando su borde blanco** y pegarlo también plano.
+3. **Cerrar el sistema de visión** (tecla `q` en su ventana): la cámara solo la puede usar un programa a la vez.
+4. **Calibrar** (desde `C:/Users/Allis/Documents/guia/vision-system`, con `PYTHONIOENCODING=utf-8`):
+   ```bash
+   .venv\Scripts\python -m vision.tools.calibrar_camara --indice 1 --camara "NullPointer C270"
+   ```
+   Mostrar el patrón en posiciones **variadas**: las 9 zonas del cuadro (sobre todo las esquinas), 3
+   distancias y al menos 4 vistas inclinadas. Seguir la línea `>` del panel, no el contador de capturas;
+   cuando diga "ya alcanza", apretar `C`. Esperar el veredicto: **EXCELENTE/BUENA** sirven; **MALA** no
+   guarda el perfil (casi siempre es que el patrón no estaba plano).
+5. **Verificar a ojo**: `... calibrar_camara --verificar --indice 1 --camara "NullPointer C270"` muestra la imagen
+   original y la corregida con una rejilla recta; las líneas del tablero deben quedar rectas a la derecha.
+6. **Medir la precisión**: `... precision_ubicacion --camara "NullPointer C270"` (usa el marcador de prueba
+   sobre el tablero, alineado a la cuadrícula). Contar cuadros da la distancia real (ver los tips). Anotar el
+   error en mm en `docs/calibracion.md`.
+7. **Usar el perfil nuevo**: lanzar la visión con `--camara "NullPointer C270"` en vez de `logitech_c270` y
+   repetir la comprobación de los rovers (pasos 7 y 8): las posiciones y los `theta` deben seguir igual o
+   mejorar.
 
 ### Fase B — Rover con ruedas en el aire, telemetría simulada
 
