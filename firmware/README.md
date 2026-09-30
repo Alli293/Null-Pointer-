@@ -15,23 +15,18 @@ El código de fábrica que traían los rovers está respaldado en [`rover_origin
 ## Despliegue
 
 Las librerías `ideaboard`, `hcsr04`, `adafruit_motor`, etc. ya vienen en `/lib` del rover.
+Guía completa (conexión, respaldo, despliegue, pruebas) en el [README raíz](../README.md#4-cómo-nos-conectamos-a-los-rovers).
 
 ```bash
-pip install mpremote
-mpremote connect <PUERTO> fs cp -r ../comun :comun
-mpremote connect <PUERTO> fs cp -r . :firmware
-mpremote connect <PUERTO> fs cp code.py :code.py     # OJO: reemplaza el code.py de prueba
+python herramientas/respaldar_rover.py COM3 rover1     # respaldo (solo lectura)
+python herramientas/desplegar.py COM3                   # muestra qué copiaría
+python herramientas/desplegar.py COM3 --si              # copia comun/ + firmware/ y REEMPLAZA /code.py
 ```
 
-Crear en la raíz del dispositivo un `settings.toml` (NO se sube al repo):
-
-```toml
-CIRCUITPY_WIFI_SSID = "..."
-CIRCUITPY_WIFI_PASSWORD = "..."
-```
-
-El mismo `config.py` sirve para los dos rovers (se identifican por MAC).
-Cierra Thonny antes de usar `mpremote`: ambos no pueden compartir el puerto.
+Copiar además `settings.toml.example` al rover como `/settings.toml` (con el WiFi y `VISION_HOST`
+reales; NO se sube al repo). Sin `VISION_HOST` el firmware aborta con un mensaje y deja los
+motores frenados. Con el rover reiniciado, `python -m mpremote connect <PUERTO> repl` muestra los
+`print` (conexión y cambios de estado). Cierra Thonny antes: no comparte el puerto.
 
 ## Probar sin hardware
 

@@ -30,12 +30,13 @@ Desde este repo:
 
 ```bash
 cd pc_dev
-python ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10 --color green
+python ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10
 ```
 
-Imprime cada cambio de estado del `RoverFSM` y, cada cierto número de frames, el
-mundo visto (posición propia, cubo del color asignado, si el mensaje se considera
-"utilizable"). Sirve para confirmar en vivo que:
+Corre el `ControladorRover` (el mismo del firmware) e imprime cada cambio de estado y,
+cada cierto número de frames, el estado, el color asignado, los comandos de rueda
+`(izq, der)` que mandaría y la pose propia. El mock no reacciona a esos comandos.
+Para el lazo cerrado usar `pc_dev/simulador_fisico.py` (`pytest`). Sirve para confirmar en vivo que:
 
 - El emparejamiento por `color`/`id` funciona con datos que van cambiando.
 - Las transiciones de estado ocurren cuando deberían (acercamiento, oclusión, `FINISHED`).

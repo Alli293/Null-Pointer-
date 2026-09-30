@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Corre la logica de comun/ (validacion + RoverFSM) contra un publisher real de
-telemetria (p.ej. mock_publisher.py del repo guia) sin necesitar ningun ESP32.
+"""Corre el ControladorRover de comun/ (el mismo que el firmware) contra un publisher
+real de telemetria (p.ej. mock_publisher.py del repo guia), SIN ESP32 ni motores.
 
-Ver simulacion/README.md para levantar el publisher simulado.
+Imprime los cambios de estado y los comandos de rueda que el rover "mandaria".
+Ojo: el mock_publisher NO reacciona a esos comandos (publica un mundo que evoluciona
+solo), asi que sirve para ver la decision en vivo, no para cerrar el lazo. Para el
+lazo cerrado usar pc_dev/simulador_fisico.py (pytest).
 
-Uso:
-    python ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10 --color green
+Ver simulacion/README.md. Uso:
+    python ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10
 """
 
 import argparse
@@ -16,27 +19,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from comun import contrato, mundo
-from comun.maquina_estados import RoverFSM
+from comun.rover import ControladorRover
 
 from cliente_vision_sim import ClienteVision
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--host", required=True, help="IP de la PC que corre el sistema de vision")
     parser.add_argument("--port", type=int, default=2026)
     parser.add_argument("--id", type=int, required=True, help="ID de marcador ArUco de este rover")
-    parser.add_argument("--color", required=True, choices=("red", "green", "blue"))
+    parser.add_argument("--ids", default="10,11", help="IDs de los dos rovers (reparte los colores)")
     parser.add_argument("--cada", type=int, default=10, help="imprimir cada N mensajes (a 20Hz, 10 = ~2 veces/seg)")
     args = parser.parse_args()
 
+    ids = [int(x) for x in args.ids.split(",")]
     cliente = ClienteVision(args.host, args.port)
     cliente.conectar()
-    print(f"Conectado a {args.host}:{args.port}, simulando rover id={args.id} color={args.color}")
+    ctrl = ControladorRover(args.id, ids)
+    print(f"Conectado a {args.host}:{args.port}, rover id={args.id}, color inicial={ctrl.fsm.color_asignado}")
 
     estimador_latencia = mundo.EstimadorLatencia()
-    fsm = RoverFSM(args.id, args.color)
-
     contador = 0
     estado_previo = None
     try:
@@ -45,18 +48,20 @@ def main():
             contador += 1
 
             utilizable = mundo.mensaje_utilizable(msg, int(time.time() * 1000), estimador_latencia)
-            estado = fsm.transicion(msg) if utilizable or msg.get("phase") == contrato.FASE_FINISHED else fsm.estado
+            if utilizable or msg.get("phase") == contrato.FASE_FINISHED:
+                izq, der = ctrl.paso(msg)
+            else:
+                izq, der = 0.0, 0.0
 
-            if estado != estado_previo:
-                print(f"[seq={msg.get('seq')}] fase={msg.get('phase')} -> estado FSM: {estado_previo} -> {estado}")
-                estado_previo = estado
+            if ctrl.estado != estado_previo:
+                print(f"[seq={msg.get('seq')}] fase={msg.get('phase')} -> estado: {estado_previo} -> {ctrl.estado}")
+                estado_previo = ctrl.estado
 
             if contador % args.cada == 0:
                 rover = mundo.mi_rover(msg, args.id)
-                cubo = mundo.cubo_por_color(msg, args.color)
                 print(
-                    f"  seq={msg.get('seq')} rover={rover} "
-                    f"cubo_{args.color}={cubo} estado={estado} utilizable={utilizable}"
+                    f"  seq={msg.get('seq')} fase={msg.get('phase')} estado={ctrl.estado} "
+                    f"color={ctrl.fsm.color_asignado} ruedas=({izq:+.2f},{der:+.2f}) rover={rover}"
                 )
     except KeyboardInterrupt:
         print("\nDetenido por el usuario.")
