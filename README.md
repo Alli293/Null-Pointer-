@@ -87,6 +87,26 @@ cubo** (lado opuesto al depot), avanza siguiendo la línea cubo→depot corrigie
 visión confirma el cubo dentro de la zona (con 1 celda de margen), retrocede y pasa a su siguiente color. Si el cubo
 se escapa, lo recupera. No se mueve fuera de la fase `RUNNING` y se detiene en `FINISHED`.
 
+### Cómo arranca el código en el rover (y por qué existe el repositorio)
+
+**Pregunta frecuente:** *"CircuitPython solo corre un archivo llamado `code.py`; ¿por qué tenemos tantos archivos y un
+repositorio?"*
+
+- **Es cierto:** al encender, CircuitPython solo ejecuta por sí mismo un archivo en la **raíz** del rover llamado
+  `code.py` (o `main.py`). Ningún otro archivo corre solo.
+- **Nuestro `code.py` es un lanzador de dos líneas** (`firmware/code.py`): llama a `firmware/main.py`, y este importa
+  `comun/`, los motores, los sensores y el LED. Es un programa normal de varios archivos, con `code.py` como puerta de entrada.
+- **El código SÍ está en los robots.** `desplegar.py` copia los 18 archivos (`comun/`, `firmware/` y el `code.py`) al
+  rover, y se comprobó: al reiniciar imprimió `conectado a vision 192.168.51.119 2026` y la visión lo listó como cliente.
+  (Estado actual: rover 1 desplegado; rover 2 con el despliegue a medias, ver la [tabla de estado](#estado-de-un-vistazo).)
+- **Para qué sirve el repositorio, si el código ya está en los robots:**
+  1. **Fuente única y respaldo:** si el flash de un rover se daña o se sobrescribe, el código sigue en GitHub; los rovers
+     solo reciben una copia.
+  2. **Trabajo en equipo e historial:** quién cambió qué, revisión por PR, poder volver atrás. Dentro del robot no hay nada de eso.
+  3. **Probar sin los robots:** `comun/` corre en la PC con 63 tests y un simulador, y así se encuentran errores antes de
+     arriesgar el hardware (ya se encontraron fallos reales de esa forma).
+  4. **Dos robots, un solo código:** cada rover se identifica por su MAC; desplegar es copiar los mismos archivos a ambos.
+
 ---
 
 ## 2. Lo que se hizo
@@ -571,6 +591,12 @@ están en [`calibracion/`](calibracion/) (`patron.pdf` y `marcador_prueba.pdf`).
 - `develop`: rama de integración; todo entra por PR (#1–#13 ya fusionados, sin ramas ni PRs pendientes).
 - Ramas de trabajo: `feat/...`, `fix/...`, `chore/...`, `docs/...`, siempre contra `develop`.
 - Commits con `Co-Authored-By` cuando los escribe Claude Code.
+- **Este README es la memoria del proyecto:** todo lo importante (decisiones, hallazgos, pruebas hechas y su resultado,
+  cambios de plan, problemas y soluciones) se agrega aquí, en el mismo PR que lo origina.
+- **El repo guía no se modifica** (`C:/Users/Allis/Documents/guia`): solo se ejecuta y se lee lo que publica.
+- **Antes de escribir en un rover** (desplegar, reemplazar su `code.py`, copiar archivos) se confirma con el equipo; antes de
+  desplegar siempre hay respaldo en `rover_original/`.
+- **Las contraseñas las escribe una persona** en `firmware/settings.toml`; nunca se leen, se muestran ni se suben.
 - **Nunca subir:** `firmware/settings.toml` (WiFi), `fotos/` (capturas de la cámara). Ambos están en `.gitignore`.
 
 ---
