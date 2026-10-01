@@ -39,6 +39,35 @@ primera prueba de movimiento con las ruedas en el aire. Detalle en el [plan](#9-
 
 ---
 
+## Para quien retoma el proyecto: qué NO está en el repo y qué hay que preparar
+
+Si clonas el repo en otra PC (o mañana en la misma), **hay cosas que Git ignora a propósito** y que no vienen en el
+`git clone`. Sin ellas el firmware no conecta o la visión no corre:
+
+| Qué NO viene en el repo | Por qué | Qué hay que hacer |
+|---|---|---|
+| `firmware/settings.toml` | Tiene la **contraseña del WiFi** | Crearlo copiando `firmware/settings.toml.example`: red `Visitas`, la contraseña (pedirla al equipo) y `VISION_HOST` = IP de **la PC que corre la visión** (`ipconfig`). **Nunca** escribirlo en el `.example` |
+| El `settings.toml` que **ya está dentro de cada rover** | Vive en el flash del rover, no en el repo | Hoy tiene la IP `192.168.51.119` (la PC de esta sesión). **Si la visión corre en otra PC, o la PC cambia de red/IP, hay que actualizarlo en los dos rovers** (si no, conectan al WiFi pero no ven la visión) |
+| El **sistema de visión** (repo guía) | Es de otra organización y **no se modifica** | Clonarlo aparte y crear su `.venv` (ver [§11](#11-guía-de-la-cámara-y-el-sistema-de-visión)). Las rutas de este README (`C:/Users/Allis/...`) son las de esta PC: ajustarlas |
+| El **índice de la cámara** (`--indice`) | Depende de la PC (aquí la C270 es el 1) | `diagnostico_camara --listar` y **mirar la imagen**; no fiarse de los nombres |
+| `mpremote` y `pytest` | Son herramientas, no código | `pip install --user mpremote` · `pip install -r pc_dev/requirements.txt` |
+| Los **puertos COM** de los rovers | Cambian al reconectar | `python herramientas/info_rover.py` y reconocer cada rover por su UID/MAC |
+| `fotos/`, `.venv`, `__pycache__` | Capturas y archivos locales | No hacen falta |
+
+**Checklist para retomar (en orden):**
+
+1. `git clone` en una ruta corta, `git checkout develop`, instalar `pytest` y correr `cd pc_dev && python -m pytest -q`
+   → deben pasar **63 tests**.
+2. Poner la PC en la **misma red de 2.4 GHz que los rovers** (`Visitas`) y anotar su IP (`ipconfig`).
+3. Instalar y levantar el sistema de visión (§11) y comprobar que ve los **4 marcadores** y los rovers.
+4. Crear `firmware/settings.toml` con esa IP.
+5. Conectar los rovers por USB (cerrar Thonny) y correr `info_rover.py`.
+6. **Pendiente conocido:** repetir el despliegue del **rover 2** (quedó a medias) y, si la IP cambió, volver a copiar el
+   `settings.toml` a los dos rovers.
+7. `probar_led.py` en ambos y, **con las ruedas en el aire**, la primera prueba de movimiento (Fase C del plan, §9).
+
+---
+
 ## Índice
 
 1. [Cómo está organizado el proyecto](#1-cómo-está-organizado-el-proyecto)
