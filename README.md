@@ -1,197 +1,259 @@
 # Null-Pointer — Vision Rover Challenge
 
 Proyecto del equipo para el [Vision Rover Challenge](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge)
-de Cenfotec: dos CenfoBot (IdeaBoard ESP32, **CircuitPython**) deben ubicar, transportar y
-depositar cubos de color en su zona, coordinándose entre sí, guiados por un sistema de
-visión externo que **solo da percepción** (posición y orientación). Toda la decisión corre
-a bordo de los rovers, sin PC externa durante la ronda.
+de Cenfotec: dos CenfoBot (IdeaBoard ESP32, **CircuitPython**) deben ubicar, transportar y depositar cubos de
+color en su zona, coordinándose entre sí. Un sistema de visión externo (cámara cenital) **solo da percepción**
+(posición y orientación); **toda la decisión corre a bordo de los rovers**, sin PC externa durante la ronda.
 
-> **Estado al 30-sep-2026:** la lógica completa está hecha y verificada **en simulación**
-> (63 tests; los 2 rovers entregan los 3 cubos en ~30 s simulados). **Probado en hardware real:**
-> lectura de los rovers por USB, mapeo de motores, mensajes ESP-NOW entre los dos, **la cámara
-> (Fase A completa: marcadores, ejes, zonas, detección de los rovers 10 y 11 con su `theta`)** y
-> **los dos rovers conectados por WiFi (`Visitas`) a la telemetría real de la visión**.
-> **Todavía no se ha probado:** ningún movimiento de ruedas con el firmware completo (ni con las
-> ruedas en el aire). Estado detallado y lo pendiente al final de la [Fase B](#fase-b--rover-con-ruedas-en-el-aire-telemetría-simulada);
-> el plan completo está en la [sección 7](#7-plan-paso-a-paso-hasta-la-prueba-real).
-
-## Índice
-
-1. [Mapa del repositorio](#1-mapa-del-repositorio)
-2. [Lo que se hizo](#2-lo-que-se-hizo)
-3. [Los rovers: hardware y datos medidos](#3-los-rovers-hardware-y-datos-medidos)
-4. [Cómo nos conectamos a los rovers](#4-cómo-nos-conectamos-a-los-rovers)
-5. [Simulación y tests](#5-simulación-y-tests)
-6. [Lo que falta por hacer](#6-lo-que-falta-por-hacer)
-7. [Plan paso a paso hasta la prueba real](#7-plan-paso-a-paso-hasta-la-prueba-real)
-8. [Problemas conocidos y soluciones](#8-problemas-conocidos-y-soluciones)
-9. [Flujo de trabajo con git](#9-flujo-de-trabajo-con-git)
-10. [Referencias](#10-referencias)
+> **Última actualización:** 30-sep-2026 · rama `develop` · 63 tests en verde · 13 PRs fusionados.
+> `main` está vacía a propósito (no hay PR a `main` todavía).
 
 ---
 
-## 1. Mapa del repositorio
+## Estado de un vistazo
+
+✅ comprobado en hardware real · 🧪 comprobado solo en simulación/tests · ⚠️ hecho pero con algo sin comprobar ·
+⏳ pendiente · ⏭️ omitido a propósito
+
+| Área | Estado | En una línea |
+|---|---|---|
+| Cámara + sistema de visión (repo guía) | ✅ | Logitech C270, 4 marcadores en orden horario, zonas y ejes correctos |
+| Detección de los rovers 10 y 11 | ✅ | Posición y `theta` correctos (0° a la derecha, sube al girar antihorario) |
+| Conexión USB a los rovers (`mpremote`) | ✅ | Leer, respaldar, ejecutar, desplegar |
+| Motores: cuál es izquierda/derecha | ✅ | `motor_1` = izquierda, `motor_2` = derecha, sin invertir (ambos rovers) |
+| ESP-NOW entre los dos rovers | ✅ | 5/5 mensajes en ambos sentidos · ⏳ el firmware aún no lo usa |
+| WiFi + telemetría real en los rovers | ✅ | Red `Visitas` (2.4 GHz); ambos se conectaron a la visión |
+| Lógica de decisión (`comun/`) | 🧪 | 2 rovers entregan los 3 cubos en ~30 s simulados, 0 choques |
+| Firmware en el rover 1 | ⚠️ | Desplegado y conectado; **ningún movimiento de ruedas probado** |
+| Firmware en el rover 2 | ⚠️ | **Despliegue interrumpido** (cable USB): hay que repetirlo |
+| LED de estado | ⚠️ | Pin IO33 confirmado en rover 1; paleta nueva sin ver; rover 2 sin confirmar |
+| Movimiento con el firmware completo | ⏳ | Primera prueba (ruedas en el aire) es el siguiente paso |
+| Sensor de agarre (ultrasónico) | ⏳ | Sin probar ni calibrar (`DISTANCIA_AGARRE_CM` es un número inventado) |
+| Sensor de color / IMU | ⏳ | Sin integrar |
+| Coordinación entre rovers por ESP-NOW | ⏳ | Hoy el reparto de colores es fijo (rover 10: rojo y azul; rover 11: verde) |
+| Evitación de colisiones robusta | ⏳ | Hoy solo una regla simple de ceder el paso |
+| Calibración propia de la cámara | ⏭️ | Se espera que la cámara del reto ya venga calibrada |
+
+**Siguiente paso inmediato:** reconectar los rovers → repetir el despliegue del rover 2 → confirmar el LED →
+primera prueba de movimiento con las ruedas en el aire. Detalle en el [plan](#9-plan-completo-lo-que-falta-paso-a-paso).
+
+---
+
+## Índice
+
+1. [Cómo está organizado el proyecto](#1-cómo-está-organizado-el-proyecto)
+2. [Lo que se hizo](#2-lo-que-se-hizo)
+3. [Qué funciona y cómo se comprobó](#3-qué-funciona-y-cómo-se-comprobó)
+4. [Los rovers: hardware y datos medidos](#4-los-rovers-hardware-y-datos-medidos)
+5. [Cómo nos conectamos a los rovers](#5-cómo-nos-conectamos-a-los-rovers)
+6. [Indicador LED (para probar sin cable)](#6-indicador-led-para-probar-sin-cable)
+7. [Cómo correr cada cosa](#7-cómo-correr-cada-cosa)
+8. [Lo que falta: por comprobar, calibrar y construir](#8-lo-que-falta-por-comprobar-calibrar-y-construir)
+9. [Plan completo: lo que falta, paso a paso](#9-plan-completo-lo-que-falta-paso-a-paso)
+10. [Tips para que funcione mejor](#10-tips-para-que-funcione-mejor)
+11. [Guía de la cámara y el sistema de visión](#11-guía-de-la-cámara-y-el-sistema-de-visión)
+12. [Problemas conocidos y soluciones](#12-problemas-conocidos-y-soluciones)
+13. [Flujo de trabajo con git](#13-flujo-de-trabajo-con-git)
+14. [Referencias](#14-referencias)
+
+---
+
+## 1. Cómo está organizado el proyecto
+
+```
+  Cámara cenital ──► Sistema de visión (PC, repo guía, NO se modifica)
+                              │  WiFi · TCP puerto 2026 · NDJSON · ~20 Hz (la cámara procesa a ~10)
+                  ┌───────────┴───────────┐
+                  ▼                       ▼
+              Rover 10  ◄── ESP-NOW ──►  Rover 11        (cada rover decide solo: comun/ + firmware/)
+```
 
 | Carpeta | Dónde corre | Qué contiene |
 |---|---|---|
-| [`comun/`](comun/) | **PC y rover** (mismo código) | Toda la decisión. `contrato.py` (constantes), `mundo.py` (emparejar por identidad, frescura, latencia), `maquina_estados.py` (FSM), `navegacion.py` (geometría y control de rumbo), `planificador.py` (a dónde ir según el estado), `rover.py` (`ControladorRover`: FSM + planificador + reparto de colores + cesión de paso), `protocolo_rovers.py` (mensajes inter-rover y reparto estático). No usa nada que no exista en CircuitPython. |
-| [`firmware/`](firmware/) | Solo rover (CircuitPython) | Lo que toca hardware: `motores.py`, `sensores.py`, `comm_vision.py` (TCP), `comm_espnow.py`, `config.py` (identidad por MAC), `main.py` (loop), `code.py` (punto de entrada), `settings.toml.example`. |
-| [`pc_dev/`](pc_dev/) | Solo PC | `simulador_fisico.py` (lazo cerrado), `ejecutar_simulacion.py` (contra un publisher real/mock), `trazar_simulacion.py` (depuración), `tests/` (pytest). |
-| [`herramientas/`](herramientas/) | PC, habla con los rovers por USB | `info_rover.py`, `respaldar_rover.py`, `probar_motores.py`, `desplegar.py`. Ver [sección 4](#4-cómo-nos-conectamos-a-los-rovers). |
-| [`rover_original/`](rover_original/) | — | Respaldo del contenido de fábrica de cada rover (`rover1/`, `rover2/`). Sirve para restaurarlos. |
+| [`comun/`](comun/) | **PC y rover** (mismo código) | **Toda la decisión.** `contrato.py` (constantes), `mundo.py` (emparejar por identidad, frescura, latencia), `maquina_estados.py` (FSM), `navegacion.py` (geometría y control de rumbo), `planificador.py` (a dónde ir según el estado), `rover.py` (`ControladorRover`: FSM + planificador + reparto de colores + ceder el paso), `protocolo_rovers.py` (mensajes entre rovers y reparto estático). |
+| [`firmware/`](firmware/) | Solo rover (CircuitPython) | Lo que toca hardware: `motores.py`, `sensores.py`, `indicador.py` (LED), `placa.py` (una sola `IdeaBoard`), `comm_vision.py` (TCP), `comm_espnow.py`, `config.py` (identidad por MAC), `main.py` (loop), `code.py` (arranque), `settings.toml.example`. |
+| [`pc_dev/`](pc_dev/) | Solo PC | `simulador_fisico.py` (lazo cerrado), `ejecutar_simulacion.py`, `trazar_simulacion.py`, `tests/` (pytest). |
+| [`herramientas/`](herramientas/) | PC, habla con los rovers por USB | `info_rover.py`, `respaldar_rover.py`, `probar_motores.py`, `probar_led.py`, `desplegar.py`. |
+| [`rover_original/`](rover_original/) | — | Respaldo del contenido de fábrica de cada rover (`rover1/`, `rover2/`), para restaurarlos. |
+| [`calibracion/`](calibracion/) | — | PDF del patrón de calibración de cámara (generados, **no hace falta imprimirlos** por ahora). |
 | [`docs/`](docs/) | — | [`contrato_telemetria.md`](docs/contrato_telemetria.md) (protocolo v2) y [`arquitectura.md`](docs/arquitectura.md). |
 | [`simulacion/`](simulacion/) | — | Cómo usar el `mock_publisher` del repo guía. |
 
-**Idea central:** la lógica (`comun/`) se escribe una sola vez, se prueba con `pytest` en la
-PC y se copia **sin cambios** al rover. Lo que funciona en simulación es lo que corre en el robot.
+**Idea central:** la lógica (`comun/`) se escribe una sola vez, se prueba con `pytest` en la PC y se copia
+**sin cambios** al rover. Lo que funciona en simulación es lo que corre en el robot.
+
+**Estrategia del rover:** el cubo se **empuja** con el frente (entre las paletas). El rover se ubica **detrás del
+cubo** (lado opuesto al depot), avanza siguiendo la línea cubo→depot corrigiendo el desvío lateral, suelta cuando la
+visión confirma el cubo dentro de la zona (con 1 celda de margen), retrocede y pasa a su siguiente color. Si el cubo
+se escapa, lo recupera. No se mueve fuera de la fase `RUNNING` y se detiene en `FINISHED`.
 
 ---
 
 ## 2. Lo que se hizo
 
-Cronológico, en `develop` (PRs #1 a #5):
+Todo está en `develop`, entrado por PR:
 
-1. **Esqueleto inicial** (PR #1): `comun/`, `firmware/`, `pc_dev/`, docs y 24 tests.
-2. **Protocolo de telemetría v2** (PR #2): `clock`, `depot_size`, `cube_side`, `start` distinto del
-   origen, zonas de entrega como rectángulos. La entrega se verifica con la fórmula exacta del
-   contrato (`mundo.cubo_en_su_zona`).
-3. **Migración a CircuitPython** (PR #3): el esqueleto asumía MicroPython, pero los rovers traen
-   **CircuitPython 9.2.4** (IdeaBoard de CRCibernetica). Se reescribió `firmware/` con `ideaboard`,
-   `hcsr04`, `socketpool`/`wifi` y el módulo `espnow`. `comun/` no cambió.
-4. **Identidad por MAC + respaldo del rover 2** (PR #4): un solo `config.py` sirve para los dos
-   rovers; cada uno se reconoce por la MAC de su radio. Los IDs ArUco se decodificaron de fotos
-   de los stickers.
-5. **Navegación, planificador y simulador físico** (PR #5):
-   - Estrategia: el cubo se **empuja** con el frente (entre las paletas). El rover se ubica
-     detrás del cubo (lado opuesto al depot), avanza siguiendo la línea cubo→depot corrigiendo el
-     desvío lateral, suelta cuando la visión confirma el cubo adentro de la zona (con 1 celda de
-     margen), retrocede y pasa al siguiente color. Si el cubo se escapa, lo recupera.
-   - FSM: umbral de agarre realista (6 celdas, no 1: el centro del rover nunca llega tan cerca),
-     entrega por zona, recuperación de cubo perdido.
-   - `ControladorRover.paso(msg, tiene_cubo)` devuelve `(izq, der)`; lo usan igual el firmware y
-     el simulador. No se mueve fuera de la fase `RUNNING`; en `FINISHED` se detiene.
-   - `firmware/main.py`: loop con paro de seguridad (sin telemetría por >500 ms, error o Ctrl-C →
-     motores frenados).
-6. **Herramientas y cabos sueltos** (este PR): scripts en `herramientas/`, `VISION_HOST` leído del
-   `settings.toml`, mensajes de diagnóstico en `main.py`, `ejecutar_simulacion.py` usando el
-   controlador real, este README.
+| PR | Qué | Resultado |
+|---|---|---|
+| #1 | Esqueleto inicial: `comun/`, `firmware/`, `pc_dev/`, docs | 24 tests |
+| #2 | Protocolo de telemetría **v2** (`clock`, `depot_size`, `cube_side`, zonas rectangulares) | Entrega verificada con la fórmula exacta del contrato |
+| #3 | Migración a **CircuitPython** (los rovers no usan MicroPython) | `firmware/` reescrito con `ideaboard`, `hcsr04`, `socketpool`, `espnow` |
+| #4 | `config.py` único: cada rover se identifica por su **MAC** | IDs ArUco 10 y 11 decodificados de fotos de los stickers |
+| #5 | Navegación, planificador, `ControladorRover` y **simulador físico** | 3 cubos entregados en ~30 s simulados |
+| #6 | Herramientas de USB, `VISION_HOST` por `settings.toml`, README | `info_rover`, `respaldar_rover`, `probar_motores`, `desplegar` |
+| #7, #10, #11 | Documentación de la Fase A (cámara) y guía de calibración | Calibración propia **omitida** a propósito |
+| #8 | Tips de prueba y `FACTOR_VELOCIDAD` (0.5) | Velocidades de avance/empuje ajustables |
+| #9 | LED de estado y **una sola `IdeaBoard` compartida** | Corrige un fallo real (ver abajo) |
+| #12 | `desplegar.py` escribe con `open()` en vez de `mpremote fs cp` | Despliegue verificado por tamaño |
+| #13 | LED en **IO33**, paleta sin rojo mezclado + parpadeos, `PIN_IR = None`, `probar_led.py` | Ver [§6](#6-indicador-led-para-probar-sin-cable) |
 
-**Hallazgos en hardware real** (ver [sección 3](#3-los-rovers-hardware-y-datos-medidos)):
-los rovers no traían código de coordinación ni de sensores propio (solo el de fábrica de la
-IdeaBoard y pruebas de LED/motores/I2C); `motor_1` es la rueda izquierda y `motor_2` la derecha,
-ambos van hacia adelante con potencia positiva (sin invertir); ESP-NOW funciona en ambos sentidos
-(5 de 5 mensajes, señal de −22 a −31 dBm a corta distancia).
+**Hallazgos que cambiaron el diseño** (todos descubiertos al tocar hardware real):
+
+- Los rovers corren **CircuitPython 9.2.4**, no MicroPython: el esqueleto inicial hubo que reescribirlo.
+- El umbral de agarre de 1 celda era irreal: el centro del rover nunca llega tan cerca del cubo (ahora 6).
+- `Motores` y `Sensores` creaban cada uno su `IdeaBoard()`; **la segunda instancia falla en el rover** ("pin in use").
+  Ahora hay una sola (`firmware/placa.py`) y un test que lo vigila.
+- `mpremote fs cp` **falla en CircuitPython** con archivos que aún no existen en el rover; se reemplazó por un
+  método propio que verifica el tamaño.
+- El `board.NEOPIXEL` de la IdeaBoard (IO2) **no muestra nada**; el LED que responde está en **IO33**, con orden
+  de colores GRB, y en el rover 1 el **rojo mezclado con otros colores se pierde**.
+- El ESP32 **solo trabaja en 2.4 GHz** (medido con un escaneo desde el propio rover: solo ve canales 1–13).
+- La numeración de `--indice` de la cámara **no coincide con el orden de los nombres** (la C270 es el índice 1).
+- Los números de puerto COM **cambian** al reconectar: se identifica cada rover por UID/MAC.
 
 ---
 
-## 3. Los rovers: hardware y datos medidos
+## 3. Qué funciona y cómo se comprobó
+
+### 3.1 Comprobado en hardware real
+
+| Qué | Cómo se comprobó | Resultado |
+|---|---|---|
+| Lectura de los rovers por USB | `info_rover.py` | Versión, UID y MAC de ambos |
+| Respaldo del contenido de fábrica | `respaldar_rover.py` | En `rover_original/` (solo lectura) |
+| Motores | `exec` desde RAM, 40 % durante 1.5 s, con la persona viendo | `motor_1` = rueda izquierda, `motor_2` = derecha, ambas hacia adelante, en los dos rovers |
+| ESP-NOW | Un rover escucha 12 s y el otro manda 5 mensajes; luego al revés | **5 de 5** en ambos sentidos, RSSI −22 a −31 dBm (corta distancia) |
+| Banda de WiFi | Escaneo de redes desde el rover | Solo canales 1, 4, 7 y 10 → solo 2.4 GHz |
+| WiFi + visión | Firmware desplegado, reinicio y lectura de lo que imprime | Ambos: `conectado a vision 192.168.51.119 2026`; la visión los lista como clientes (`192.168.51.8`, `192.168.50.193`): **misma red, sin aislamiento** |
+| Cámara (Fase A) | Ventana en vivo y lectura del puerto 2026 | Ver tabla siguiente |
+| LED en IO33 (rover 1) | Pruebas de colores con la persona viendo | Responde en IO33, orden GRB; rojo mezclado débil |
+
+**Cámara y visión** (con la cámara real, 30-sep-2026):
+
+| Comprobación | Resultado |
+|---|---|
+| Marcadores de esquina | `Esquinas 4 de 4`, en **orden horario**: 0 arriba-izquierda, 1 arriba-derecha, 2 abajo-derecha, 3 abajo-izquierda |
+| Zonas y salida | Verde arriba, roja a la derecha, azul abajo, salida al centro del lado izquierdo |
+| Coordenadas | Contando celdas desde el marcador 0 a mano, el cubo rojo dio col ≈ 20, igual que la visión |
+| Sentido de los ejes | Cubo movido a la izquierda y hacia abajo: `col` bajó (34.3 → 23.3), `row` subió (24.2 → 39.6) ✔ |
+| Veredicto de entrega | Cubo azul en (23.30, 39.57) → la visión lo marcó **EN POSICIÓN**; coincide con `mundo.cubo_en_su_zona` |
+| Oclusión | Un cubo tapado quedó con `edad 10100 ms` (naranja): la visión conserva su última posición |
+| Rovers 10 y 11, mirando a la derecha | `theta` **358.4° y 358.7°** (≈ 0°): el frente real coincide con el "adelante" del marcador |
+| Rovers girados hacia arriba | `theta` **86.9° y 89.4°** → `theta` sube en sentido antihorario, como espera `navegacion.py` |
+| Velocidad | La visión procesa a **~10 cuadros/s** a 1280×720 (publica a 20 Hz) |
+
+### 3.2 Comprobado solo en simulación y tests
+
+`cd pc_dev && python -m pytest -q` → **63 tests** (~2 s, sin hardware ni red):
+
+| Archivo | Tests | Qué cubre |
+|---|---|---|
+| `test_ciclo_completo.py` | 11 | **Lazo cerrado:** los 2 rovers entregan los 3 cubos sin choques; con ruido de visión (0.15 y 0.3 celdas); no se mueven fuera de `RUNNING`; se detienen en `FINISHED` |
+| `test_firmware_main.py` | 10 | Ejecuta `firmware/main.py` en la PC con hardware falso: config por MAC, motores, paro seguro, exige `VISION_HOST`, una sola `IdeaBoard`, LED en IO33 sin choque de pines, parpadeos con reloj falso |
+| `test_maquina_estados.py` | 15 | Estados y transiciones (agarre, entrega por zona, cubo perdido) |
+| `test_mundo.py` | 18 | Contrato v2, frescura, latencia, `cubo_en_su_zona` |
+| `test_navegacion.py` | 9 | Geometría, control de rumbo, mezcla de ruedas |
+
+El simulador (`pc_dev/simulador_fisico.py`) es **propio y simple**: círculos que se empujan, 6 celdas/s y 90°/s a
+potencia máxima. **Esos números son inventados** y hay que reemplazarlos con lo medido (ver [§9](#9-plan-completo-lo-que-falta-paso-a-paso)).
+No reemplaza al `mock_publisher.py` del repo guía (que publica telemetría realista pero no reacciona a los rovers).
+
+---
+
+## 4. Los rovers: hardware y datos medidos
 
 | | Rover 1 | Rover 2 |
 |---|---|---|
-| Puerto USB (en esta PC) | `COM3` | `COM12` |
-| ID ArUco (sticker) | **10** (diccionario 4X4) | **11** (diccionario 4X4) |
+| ID ArUco (sticker, diccionario 4X4) | **10** | **11** |
 | MAC (radio WiFi / ESP-NOW) | `E0:8C:FE:25:C7:48` = `(224,140,254,37,199,72)` | `E0:8C:FE:27:A6:78` = `(224,140,254,39,166,120)` |
-| UID placa | `0EC8EF527C84` | `0EC8EF726A87` |
-| Firmware | CircuitPython 9.2.4, IdeaBoard | igual |
-| Colores asignados (estático) | rojo, azul | verde |
+| UID de la placa | `0EC8EF527C84` | `0EC8EF726A87` |
+| Puerto USB en la última sesión | `COM12` | `COM3` (**cambian**: identificar por UID/MAC) |
+| Colores asignados (fijo por ahora) | rojo, azul | verde |
+| Placa / firmware | CRCibernetica **IdeaBoard (ESP32)**, CircuitPython 9.2.4 | igual |
 
-> Los números de puerto pueden cambiar si se enchufan en otro orden o en otra PC; lo que
-> identifica a cada rover es la MAC, y `firmware/config.py` la usa.
+**Pines:**
 
-**Pines (código de fábrica de la IdeaBoard, en `rover_original/`):**
+| Función | Pin / detalle | Comprobado |
+|---|---|---|
+| Motor 1 (**rueda izquierda**) | IO12 / IO14 | ✅ |
+| Motor 2 (**rueda derecha**) | IO13 / IO15 | ✅ |
+| **LED de estado (NeoPixel)** | **IO33**, orden GRB | ✅ rover 1 · ⏳ rover 2 |
+| Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 (código de fábrica) | ⏳ sin probar |
+| Infrarrojo | El ejemplo de fábrica lo pone en IO33 (el pin del LED): **no se usa** (`PIN_IR = None`) | — |
+| `board.NEOPIXEL` de la IdeaBoard | IO2 — **no muestra nada** en estos rovers | ✅ |
+| IMU | I2C, librería `adafruit_lsm6ds` | ⏳ sin integrar |
+| Sensor de color | I2C (Qwiic) | ⏳ sin integrar |
 
-| Función | Pin / detalle |
-|---|---|
-| Motor 1 (**rueda izquierda**) | IO12 / IO14 |
-| Motor 2 (**rueda derecha**) | IO13 / IO15 |
-| Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 |
-| **LED de estado (NeoPixel)** | **IO33**, orden de colores GRB. Medido en el rover 1. El `board.NEOPIXEL` de la IdeaBoard (IO2) **no muestra nada** en estos rovers. Rover 2: pendiente de confirmar |
-| Infrarrojo | El ejemplo de fábrica lo pone en IO33, pero ese pin es el del LED: **no se usa** (`PIN_IR = None`; no interviene en la lógica) |
-| LED RGB | NeoPixel integrado (`board.NEOPIXEL`) |
-| IMU | I2C, librería `adafruit_lsm6ds` |
-| Sensor de color | I2C (Qwiic) — **aún sin integrar** |
-
-Librerías ya instaladas en `/lib` de ambos rovers: `ideaboard`, `hcsr04`, `adafruit_motor`,
-`adafruit_lsm6ds`, `neopixel`, `simpleio`, `adafruit_requests`, etc.
-
-**Contenido de fábrica:** `code.py` (prueba del LED), `prueba.py` (LED + motores + I2C, idéntico
-en ambos) y `examples/`. El `code.py` del rover 2 era solo `print('standby, sin wifi')` con un
-bucle infinito (por eso `mpremote` no podía entrar sin Ctrl-C).
+Librerías ya en `/lib` de ambos: `ideaboard`, `hcsr04`, `adafruit_motor`, `adafruit_lsm6ds`, `neopixel`, `simpleio`,
+`adafruit_requests`, etc. **Contenido de fábrica:** `code.py` (prueba de LED), `prueba.py` (LED + motores + I2C) y
+`examples/`; el `code.py` del rover 2 era `print('standby, sin wifi')` con un bucle infinito. Ninguno traía código
+de coordinación ni de sensores propio.
 
 ---
 
-## 4. Cómo nos conectamos a los rovers
+## 5. Cómo nos conectamos a los rovers
 
-Desde la sesión de Claude Code (y desde cualquier terminal) se habla con los rovers **por el
-cable USB**, sin Thonny, con **`mpremote`**, la herramienta oficial de MicroPython/CircuitPython.
-Claude Code corre los comandos en la terminal de la PC; no hay nada "mágico".
+Se habla con los rovers **por el cable USB**, sin Thonny, con **`mpremote`**; Claude Code simplemente corre los
+comandos en la terminal de la PC.
 
-### Preparación (una vez por PC)
+**Preparación (una vez por PC):** `pip install --user mpremote` y listar con `python -m mpremote connect list`.
+Siempre `python -m mpremote ...` (el ejecutable queda fuera del PATH). **Cerrar Thonny** (un puerto no se comparte).
+Para mover motores hace falta además encender la batería de motores (el USB solo alimenta la lógica).
 
-```bash
-pip install --user mpremote            # trae pyserial
-python -m mpremote connect list        # lista los puertos (COM3, COM12...)
-```
-
-Siempre `python -m mpremote ...` (no `mpremote`): el ejecutable queda en una carpeta fuera del
-PATH (ver [problemas conocidos](#8-problemas-conocidos-y-soluciones)).
-
-**Reglas:** cerrar Thonny (un puerto no se comparte); conectar el rover por USB; para mover
-motores hace falta además encender su batería de motores (el USB solo alimenta la lógica).
-
-### Herramientas del repo (`herramientas/`)
-
-| Herramienta | Qué hace | ¿Mueve algo? |
+| Herramienta (`herramientas/`) | Qué hace | ¿Mueve algo? |
 |---|---|---|
-| `python herramientas/info_rover.py` | Lista los rovers conectados y muestra versión, UID y MAC | No (solo lectura) |
-| `python herramientas/respaldar_rover.py COM3 rover1` | Copia los archivos propios del rover a `rover_original/rover1/` | No (solo lectura) |
-| `python herramientas/probar_motores.py COM3 --ruedas-en-el-aire` | Gira cada motor 1.5 s al 40 %, uno por uno | **Sí: levantar el rover y encender baterías.** Se niega a correr sin el flag |
-| `python herramientas/desplegar.py COM3` | Muestra qué archivos copiaría | No (simulación) |
-| `python herramientas/desplegar.py COM3 --si` | Copia `comun/` + `firmware/` y **reemplaza `/code.py`** | Escribe en el rover (respaldar antes). Si el cable se suelta a la mitad, el rover queda con archivos mezclados: **repetir el despliegue completo** |
-| `python herramientas/probar_led.py COM12` | Recorre los estados del LED (4 s cada uno) para verlos con los ojos; `--segundos`, `--estados a,b` | No mueve motores; interrumpe el firmware (reiniciar el rover después) |
+| `python herramientas/info_rover.py` | Lista los rovers y muestra versión, UID y MAC | No |
+| `python herramientas/respaldar_rover.py COM12 rover1` | Copia los archivos propios del rover a `rover_original/rover1/` | No |
+| `python herramientas/probar_motores.py COM12 --ruedas-en-el-aire` | Gira cada motor 1.5 s al 40 % | **Sí**: levantar el rover y encender baterías; se niega sin el flag |
+| `python herramientas/probar_led.py COM12` | Recorre los estados del LED (`--segundos`, `--estados a,b`) | No (interrumpe el firmware; reiniciar el rover después) |
+| `python herramientas/desplegar.py COM12` | Muestra qué copiaría | No (simulación) |
+| `python herramientas/desplegar.py COM12 --si` | Copia `comun/` + `firmware/` y **reemplaza `/code.py`** | Escribe en el rover. Si el cable se suelta a mitad, **repetir el despliegue completo** |
 
-### Comandos sueltos útiles
+<details>
+<summary><b>Comandos sueltos útiles y cómo se despliega paso a paso</b></summary>
 
 ```bash
-# Ejecutar código en el rover desde RAM (no guarda nada). Si falla con "could not enter raw repl",
-# el rover está en un bucle: mandarle Ctrl-C primero (las herramientas del repo ya lo hacen).
-python -m mpremote connect COM3 exec "import wifi; print(list(wifi.radio.mac_address))"
-
-# Copiar un archivo hacia / desde el rover
-python -m mpremote connect COM3 fs cp firmware/config.py :firmware/config.py
-python -m mpremote connect COM3 fs cp :/code.py code_respaldo.py
+# Ejecutar código en el rover desde RAM (no guarda nada)
+python -m mpremote connect COM12 exec "import wifi; print(list(wifi.radio.mac_address))"
 
 # Consola en vivo (ver los print del firmware). Salir con Ctrl-]
-python -m mpremote connect COM3 repl
+python -m mpremote connect COM12 repl
 ```
 
-### Lo que hizo Claude en esta sesión con los rovers
+**Desplegar a un rover (con USB y las ruedas en el aire):**
+1. `python herramientas/info_rover.py` → identificar el rover por UID (no por el COM).
+2. `python herramientas/respaldar_rover.py <COM> <rover1|rover2>` (solo la primera vez).
+3. Crear `firmware/settings.toml` (Git lo ignora) a partir de `settings.toml.example`, con el WiFi, la contraseña y
+   `VISION_HOST` = IP de la PC de visión (`ipconfig`). **Nunca** escribir la contraseña en el `.example`.
+4. `python herramientas/desplegar.py <COM> --si` (debe terminar en `Listo` sin `ERROR`) y copiar el `settings.toml`
+   al rover con `_rover.subir` o `mpremote`.
+5. Reiniciar el rover y abrir `python -m mpremote connect <COM> repl`: debe imprimir
+   `rover 10|11 conectando WiFi...` y `conectado a vision <IP> 2026`.
 
-1. `mpremote connect list` → encontró `COM3` y `COM12` (chip CH340).
-2. Identificó el firmware (`sys.implementation` → CircuitPython, no MicroPython).
-3. Listó el sistema de archivos y **respaldó** los archivos propios en `rover_original/`
-   (solo lectura).
-4. Leyó la MAC de cada radio (`wifi.radio.mac_address`).
-5. **Probó motores** uno por uno desde RAM (40 %, 1.5 s, con `try/finally` que frena siempre)
-   con el rover levantado y la persona confirmando qué rueda giró.
-6. **Probó ESP-NOW** desde RAM: un rover escucha 12 s y el otro manda 5 mensajes; luego al revés.
-7. **No** subió nada al rover ni tocó sus `code.py`. El firmware todavía no está desplegado.
+CircuitPython arranca `code.py` solo al dar energía: tener las ruedas en el aire. Sin `VISION_HOST` el firmware
+aborta con un mensaje y deja los motores frenados.
+</details>
 
-> CircuitPython **recarga solo** al guardar archivos en el rover y arranca `code.py` al
-> encender/reiniciar. Al desplegar, el rover empieza a ejecutar el firmware apenas se
-> reinicia: tener las ruedas en el aire y `VISION_HOST` configurado (si falta, el firmware
-> aborta con un mensaje y deja los motores frenados).
+---
 
-### Sin cable USB: indicador LED
+## 6. Indicador LED (para probar sin cable)
 
-Para las pruebas en el suelo los rovers van **sin cable a la PC** (autonomía del reto, y el cable se
-enreda). Sin USB no hay REPL ni `print`, así que un LED dice qué hace el rover
-(`firmware/indicador.py`).
+Para las pruebas en el suelo los rovers van **sin cable a la PC** (autonomía del reto, y el cable se enreda). Sin USB
+no hay REPL ni `print`, así que un LED dice qué hace el rover (`firmware/indicador.py`).
 
-**Medido en los rovers (30-sep-2026):** el LED que responde es un **NeoPixel en IO33**, con orden de colores
-**GRB**. El `board.NEOPIXEL` de la IdeaBoard (IO2) no muestra nada. Además, en el LED del rover 1 el **rojo
-mezclado con otros colores se pierde** (se vio rojo puro, pero no amarillo/magenta/rosa), así que la paleta usa
-solo **verde, azul, cian, blanco y rojo puro**: cada familia de color dice una cosa y el **parpadeo** dice la etapa.
+**Medido:** el LED que responde es un **NeoPixel en IO33**, orden **GRB**. El rojo mezclado se pierde en el LED del
+rover 1, así que la paleta usa solo **verde, azul, cian, blanco y rojo puro**: la familia de color dice qué pasa y el
+**parpadeo** dice la etapa.
 
 | LED | Significa |
 |---|---|
@@ -205,409 +267,319 @@ solo **verde, azul, cian, blanco y rojo puro**: cada familia de color dice una c
 | ⚪ Blanco **fijo** | `OCIOSO` (terminó su cola de colores) |
 | ⚪ Blanco **lento** | `DETENIDO` (ronda terminada, `FINISHED`) |
 | 🔴 Rojo **lento** | Dejó de llegar telemetría: motores frenados |
-| 🔴 Rojo **fijo** | **Error** (p. ej. falta `VISION_HOST` en `settings.toml`): motores frenados. Conectar el USB y ver el mensaje con `mpremote ... repl` |
+| 🔴 Rojo **fijo** | **Error** (p. ej. falta `VISION_HOST`): motores frenados. Conectar el USB y leer el mensaje con `repl` |
 
-Lento = 1 Hz (0.5 s encendido / 0.5 s apagado); rápido = 4 Hz. Al cambiar de estado el LED empieza encendido.
-**Verificación visual:** en el rover 1, con la paleta **anterior** (sin parpadeos), se vieron bien `esperando` (azul),
-`error` (rojo), `BUSCAR` (morado), `APROXIMAR` (azul) y `OCIOSO` (blanco); en los estados que mezclan rojo se vieron
-menos de los esperados, y de ahí salió la paleta nueva. **La paleta nueva con parpadeos todavía no se ha visto
-con los ojos**: correr `python herramientas/probar_led.py <PUERTO>` en cada rover para confirmarla.
+Lento = 1 Hz, rápido = 4 Hz. Al cambiar de estado el LED empieza encendido.
 
-Antes de quitar el cable: confirmar que la placa **enciende con las baterías** (hoy no sabemos si la
-batería de motores también alimenta la lógica), que `settings.toml` está copiado y que las ruedas
-están en el aire para el primer arranque sin USB. El firmware arranca solo al dar energía y **no se
-mueve** mientras la fase no sea `RUNNING`. La PC de visión debe seguir encendida y en la misma red.
+**Qué se vio con los ojos:** con la paleta **anterior** en el rover 1 se vieron bien `esperando` (azul), `error`
+(rojo), `BUSCAR` (morado), `APROXIMAR` (azul) y `OCIOSO` (blanco); los estados que mezclan rojo se vieron menos de lo
+esperado y de ahí salió esta paleta. **⚠️ La paleta nueva con parpadeos aún no se ha visto con los ojos**
+(`python herramientas/probar_led.py <PUERTO>`), y el pin del LED del **rover 2 no está confirmado**.
 
----
-
-## 5. Simulación y tests
-
-```bash
-pip install -r pc_dev/requirements.txt     # solo pytest
-cd pc_dev
-python -m pytest -q                        # 57 tests, ~2 s, sin hardware ni red
-```
-
-- `tests/test_ciclo_completo.py`: **lazo cerrado** — los 2 rovers entregan los 3 cubos (sin
-  choques; también con ruido de visión de 0.15 y 0.3 celdas), no se mueven fuera de `RUNNING`,
-  se detienen en `FINISHED`.
-- `tests/test_firmware_main.py`: ejecuta `firmware/main.py` en la PC con módulos de hardware
-  falsos (config por MAC, motores, paro seguro, exige `VISION_HOST`).
-- `tests/test_navegacion.py`, `test_maquina_estados.py`, `test_mundo.py`: unidades.
-- `python pc_dev/trazar_simulacion.py [ruido] [segundos]`: imprime los cambios de estado y choques
-  de una corrida, útil para depurar la estrategia.
-
-El simulador físico (`pc_dev/simulador_fisico.py`) es **propio** y simple (círculos que se empujan,
-6 celdas/s y 90°/s a potencia máxima, escenario de `config_simulador.json` del repo guía). No
-reemplaza al `mock_publisher.py` del repo guía: ese publica telemetría realista (ruido,
-oclusiones) pero **no reacciona** a los comandos de los rovers.
+**Antes de quitar el cable:** confirmar que la placa **enciende con las baterías** (no sabemos si la batería de
+motores también alimenta la lógica), que `settings.toml` está copiado y que las ruedas están en el aire para el
+primer arranque sin USB. La PC de visión debe seguir encendida y en la misma red.
 
 ---
 
-## 6. Lo que falta por hacer
+## 7. Cómo correr cada cosa
 
-**Bloqueantes para la prueba real** (van en el plan de la sección 7):
-- [ ] Configurar el WiFi de los rovers (`settings.toml`) y la IP de la PC de visión.
-- [ ] Desplegar el firmware a los rovers y verlos conectarse y leer telemetría.
-- [ ] Verificar la cámara y la cancha (marcadores, calibración).
-
-**Calibración en banco/cancha (números hoy inventados por el simulador):**
-- [ ] Velocidad lineal y de giro reales de cada rover vs. potencia (el simulador asume 6 celdas/s
-  y 90°/s). Hay que calibrar la diferencia entre los dos motores (factores en `motores.py`) y
-  la **potencia mínima** a la que las ruedas realmente arrancan.
-- [ ] `DISTANCIA_AGARRE_CM` (hoy 4 cm, inventado) y dónde apunta el ultrasónico.
-- [ ] **Rampa de aceleración** (limitar cuánto puede cambiar la potencia por ciclo) para arranques
-  suaves; hoy solo existe `FACTOR_VELOCIDAD` (config.py).
-- [ ] Constantes de `comun/planificador.py` (distancias de preagarre, rodeo, velocidades) y
-  umbrales de `comun/maquina_estados.py`.
-- [ ] Offset entre el centro del marcador ArUco y el centro real del chasis (el repo guía trae
-  `vision/mediciones/desfases_rover10_*.json`).
-- [ ] Geometría real de las paletas: el modelo asume que el cubo se empuja de frente.
-
-**Sensores:**
-- [ ] Integrar el sensor de color (I2C) para confirmar agarre/entrega; hoy solo hay ultrasónico.
-- [ ] Infrarrojo: hoy **no se usa** (`PIN_IR = None`, IO33 es el LED). Si se cablea uno, elegir otro pin.
-- [ ] Confirmar el pin del LED en el rover 2 y la paleta nueva en ambos (`herramientas/probar_led.py`).
-- [ ] Usar la IMU (giroscopio) para mantener rumbo entre cuadros de visión (20 Hz). El control
-  actual es proporcional sobre el `theta` de la visión, sin PID.
-
-**Lo complicado, dejado para el final a propósito:**
-- [ ] **Negociación rover↔rover por ESP-NOW** (`comun/protocolo_rovers.py`, `firmware/comm_espnow.py`):
-  hoy el reparto de colores es **estático por ID** (rover 10: rojo y azul; rover 11: verde) y
-  el firmware ya puede enviar/recibir (probado) pero `main.py` **no lo usa todavía**.
-  Falta: reclamar/liberar colores tolerando mensajes perdidos, reasignación dinámica (que un
-  rover ayude al otro cuando termina), confirmar recolección/entrega.
-- [ ] **Evitación de colisiones robusta.** Hoy: el rover de ID mayor cede el paso y se aparta, el
-  de ID menor frena de emergencia; con ruido alto quedan roces ocasionales (≤2 por corrida en el
-  simulador). Un campo de repulsión está implementado (`navegacion.repulsion`) pero apagado
-  (`ganancia_repulsion=0`) porque empeoraba el empuje.
-- [ ] Información imperfecta: hoy un cubo no fresco manda al rover a `BUSCAR` (quieto); falta un
-  patrón de búsqueda y navegar hacia la última posición conocida.
-- [ ] Botón de arranque de la IdeaBoard (hoy arranca solo al ver fase `RUNNING`).
-- [ ] Obstáculos (el campo existe en el contrato pero la primera edición va vacío).
+| Quiero… | Comando |
+|---|---|
+| Correr los tests | `pip install -r pc_dev/requirements.txt` y luego `cd pc_dev && python -m pytest -q` |
+| Ver una corrida simulada (estados y choques) | `python pc_dev/trazar_simulacion.py [ruido] [segundos]` |
+| Ver la decisión contra telemetría de un publisher | `python pc_dev/ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10` (el mock no reacciona a las ruedas) |
+| Levantar el publisher simulado del repo guía | `python contrato/mock_publisher.py` en `.../guia/vision-system/` (déjalo en una terminal interactiva; con `ready` pasa a `READY` y a los 60 s a `RUNNING`) |
+| Levantar la visión real con la cámara | Ver [§11](#11-guía-de-la-cámara-y-el-sistema-de-visión) |
+| Desplegar a un rover | Ver [§5](#5-cómo-nos-conectamos-a-los-rovers) |
 
 ---
 
-## 7. Plan paso a paso hasta la prueba real
+## 8. Lo que falta: por comprobar, calibrar y construir
 
-Orden pensado para que **cada paso valide una sola cosa** y no se arriesgue el robot antes de
-tiempo. No saltar pasos. Las ruedas en el aire son obligatorias hasta el paso 9.
+### 8.1 Ya existe pero **no lo hemos visto funcionar** (por comprobar)
 
-### Tips para que funcione mejor (leer antes de empezar)
+| Qué | Cómo comprobarlo |
+|---|---|
+| Despliegue completo del rover 2 | Repetir `desplegar.py --si`; sin `ERROR` y con los 18 archivos verificados |
+| Paleta del LED con parpadeos (ambos rovers) | `probar_led.py` en cada uno |
+| Pin del LED en el rover 2 | Si no es IO33, probar IO2 / IO32 una por una; el pin podría ser distinto por rover (tabla por MAC en `config.py`) |
+| Que la placa **enciende con baterías**, sin USB | Desconectar el USB con las baterías puestas y mirar el LED |
+| El firmware completo **moviendo ruedas**, con telemetría real | Fase C del plan |
+| `READY` → `RUNNING` y los estados del FSM con telemetría real | Fase C |
+| Que el estimador de latencia no descarte mensajes buenos por WiFi real | Fase C: el rover debe reaccionar y no quedarse en LED rojo lento |
+| Que ESP-NOW convive con la conexión WiFi (mismo canal que el router) | Antes de usarlo en `main.py` (Fase F) |
+| Ultrasónico: dónde apunta y a qué distancia detecta el cubo | Leer el sensor con un cubo a 1, 2, 3… cuadros |
+| Que la cámara de la competencia venga calibrada | Preguntar a los organizadores |
 
-**1. Contar cuadros: la cancha es su propia regla.** 1 cuadro = 1 celda = 20 mm. Cada vez que
-algo "parece raro", contar cuadros con los ojos es la comprobación más barata:
+### 8.2 Números hoy inventados (por calibrar)
+
+- Velocidad lineal y de giro reales por rover vs. potencia (el simulador asume 6 celdas/s y 90°/s) y la **potencia mínima**
+  a la que las ruedas arrancan; diferencia entre los dos motores (`_factor_izq/_factor_der` en `motores.py`).
+- `DISTANCIA_AGARRE_CM` (4 cm) en `config.py`.
+- Constantes de `comun/planificador.py` (preagarre, rodeo, velocidades) y umbrales de `comun/maquina_estados.py`.
+- Offset entre el centro del marcador ArUco y el centro real del chasis.
+- Geometría real de las paletas (el modelo asume que el cubo se empuja de frente).
+
+### 8.3 Funciones que faltan (por construir)
+
+- **Rampa de aceleración** (hoy los arranques son bruscos; solo existe `FACTOR_VELOCIDAD = 0.5`).
+- **Negociación rover↔rover por ESP-NOW**: reclamar/liberar colores tolerando mensajes perdidos, reasignación dinámica
+  (que un rover ayude al otro al terminar), confirmar recolección y entrega. El firmware ya puede enviar/recibir
+  (`comm_espnow.py`, probado) pero `main.py` **no lo usa**.
+- **Evitación de colisiones robusta**: hoy el rover de id mayor cede el paso y el de id menor frena de emergencia (≤ 2
+  roces por corrida en el simulador con ruido alto). El campo de repulsión existe (`navegacion.repulsion`) pero está
+  apagado porque empeoraba el empuje.
+- **Información imperfecta**: hoy un cubo no fresco manda al rover a `BUSCAR` (quieto); falta navegar a la última posición
+  conocida o un patrón de búsqueda.
+- **Sensor de color** (agarre/entrega más fiables que solo el ultrasónico) e **IMU** (mantener rumbo entre cuadros de
+  visión; hoy el control es proporcional sobre el `theta` de la visión, sin PID).
+- **Botón de arranque** de la IdeaBoard (hoy arranca solo al ver `RUNNING`).
+- **Obstáculos** (el campo existe en el contrato, pero la primera edición va vacío).
+
+### 8.4 Decisiones y preguntas abiertas
+
+- ¿Qué **red** se usa en la competencia? Hoy `Visitas` (2.4 GHz). Plan B: un hotspot o router propio de 2.4 GHz.
+- ¿La cámara del reto viene **calibrada**? (Se asumió que sí; si no, ver la guía de calibración en la §11.)
+- ¿Cómo se monta la cámara (soporte, altura) para ver siempre los 4 marcadores completos? ¿La cancha, los marcadores y
+  los cubos de 6 cm ya están armados?
+- ¿Cuándo se hace el PR `develop → main`? (No hay fecha: se decide cuando haya una versión estable.)
+
+---
+
+## 9. Plan completo: lo que falta, paso a paso
+
+**Reglas de seguridad para todo el plan:** un cambio por prueba · ruedas en el aire hasta terminar la Fase C · una mano
+junto al interruptor de la batería de motores · `f` (stop) en la ventana de la visión · mantener `FACTOR_VELOCIDAD = 0.5`
+hasta tener 3 corridas limpias · el firmware frena solo si se pierde la telemetría > 0.5 s.
+
+### Fase A — Cámara y sistema de visión · ✅ completa
+
+| # | Qué | Estado |
+|---|---|---|
+| A1 | Clonar e instalar el sistema de visión (repo guía, sin modificarlo) | ✅ |
+| A2 | `verificar_geometria` → `RESULTADO GENERAL: TODO OK` | ✅ |
+| A3 | Mock + `test_client` sin cámara | ✅ |
+| A4 | Montar la cancha y reubicar la cámara hasta ver los 4 marcadores | ✅ |
+| A5 | Elegir la cámara (`--indice 1`) | ✅ |
+| A6 | Calibración propia de la cámara | ⏭️ omitida (guía en la §11) |
+| A7 | Vista en vivo: orden horario, zonas, ejes, grilla | ✅ |
+| A8 | Detección de los rovers 10 y 11 con su `theta` | ✅ |
+
+### Fase B — Rovers conectados a la visión, sin mover ruedas · casi completa
+
+| # | Qué hacer | Resultado esperado | Estado |
+|---|---|---|---|
+| B1 | Red de 2.4 GHz compartida entre la PC y los rovers | Los rovers ven a la PC | ✅ `Visitas` |
+| B2 | `settings.toml` en cada rover (WiFi + `VISION_HOST`) | Copiado a ambos | ✅ |
+| B3 | Respaldar el contenido de fábrica | `rover_original/` | ✅ |
+| B4 | Desplegar el firmware al rover 1 | 18 archivos verificados; `conectado a vision` | ✅ |
+| B5 | **Repetir el despliegue del rover 2** | `desplegar.py --si` termina en `Listo`, sin `ERROR` | ⏳ |
+| B6 | Reiniciar ambos y mirar `repl` | `conectado a vision…`; la visión muestra 2 clientes | ⏳ (repetir tras B5) |
+| B7 | `probar_led.py` en ambos | Se ve la paleta; si el rover 2 no responde en IO33, probar IO2/IO32 | ⏳ |
+| B8 | Arrancar con baterías, **sin USB** | LED azul fijo; la placa enciende sin cable | ⏳ |
+
+### Fase C — Primer movimiento (ruedas en el aire)
+
+| # | Qué hacer | Resultado esperado | Estado |
+|---|---|---|---|
+| C1 | Rovers levantados, baterías de motores encendidas, USB conectado; cubos puestos; en la visión `r` (ready) y esperar 60 s | Pasa a `RUNNING`; rover 10 se orienta al cubo **rojo** y rover 11 al **verde** (LED verde lento) | ⏳ |
+| C2 | Revisar el sentido de giro y de avance | Cada rover gira hacia su cubo; si gira al revés, revisar `INVERTIR_IZQ/DER` | ⏳ |
+| C3 | Frenado | `f` (stop) y `FINISHED` paran las ruedas (LED blanco lento); sin telemetría 0.5 s → paro y LED rojo lento | ⏳ |
+| C4 | Repetir **sin USB**, con el LED como única pista | Mismo comportamiento | ⏳ |
+| C5 | Revisar la latencia con WiFi real | No hay mensajes descartados por error ni LED rojo lento espurio | ⏳ |
+
+### Fase D — Calibración en el suelo (contando cuadros; ver [§10](#10-tips-para-que-funcione-mejor))
+
+| # | Qué medir | Qué se ajusta | Estado |
+|---|---|---|---|
+| D1 | Potencia mínima a la que arrancan las ruedas | `FACTOR_VELOCIDAD` (hay que anotar el valor) | ⏳ |
+| D2 | Velocidad lineal (cuadros ÷ segundos) a 0.5, 0.7 y 1.0 | `VEL_MAX` del simulador | ⏳ |
+| D3 | Giro en el sitio (grados/s con `theta` de la visión) | `GIRO_MAX` del simulador | ⏳ |
+| D4 | Desvío al ir "recto" 20 cuadros | `_factor_izq/_factor_der` en `motores.py` | ⏳ |
+| D5 | Offset marcador ↔ centro del chasis | Corrección en la lógica si hace falta | ⏳ |
+| D6 | Ultrasónico: dónde apunta y a qué distancia ve el cubo | `DISTANCIA_AGARRE_CM` | ⏳ |
+| D7 | Actualizar constantes y simulador con lo medido; correr `pytest` | Tests siguen en verde | ⏳ |
+| D8 | Implementar la rampa de aceleración | Arranques suaves | ⏳ |
+
+Anotar cada medición (rover, potencia, cuadros, segundos) en `docs/calibracion.md` para no repetirlas.
+
+### Fase E — Pruebas en cancha, escalonadas
+
+| # | Prueba | Éxito | Estado |
+|---|---|---|---|
+| E1 | **Un rover, un cubo**, el otro apagado o fuera; cubo y depot cercanos | La visión marca el cubo **EN POSICIÓN**; el rover retrocede | ⏳ |
+| E2 | Un rover con su cola completa (rover 10: rojo y azul) | Entrega los dos | ⏳ |
+| E3 | Los dos rovers, cada uno con su color, cubos lejos entre sí | Sin cruces ni roces | ⏳ |
+| E4 | Escenario completo (3 cubos, salida a la izquierda) | Los 3 entregados; medir el tiempo con el acta de la visión (`vision/actas/`) | ⏳ |
+
+Ante un fallo: anotarlo, **reproducirlo en `simulador_fisico.py`**, corregir, `pytest`, redesplegar.
+
+### Fase F — Lo complicado (cada uno con tests en el simulador **antes** de ir al robot)
+
+| # | Qué | Estado |
+|---|---|---|
+| F1 | Negociación por ESP-NOW + reasignación dinámica (primero verificar que ESP-NOW convive con el WiFi) | ⏳ |
+| F2 | Evitación de colisiones robusta | ⏳ |
+| F3 | Información imperfecta: navegar a la última posición conocida / búsqueda | ⏳ |
+| F4 | Sensor de color para agarre y entrega | ⏳ |
+| F5 | IMU + PID para el rumbo | ⏳ |
+| F6 | Botón de arranque de la IdeaBoard | ⏳ |
+| F7 | Obstáculos (solo si vuelven en una edición futura) | ⏳ |
+
+### Fase G — Entrega y competencia
+
+| # | Qué | Estado |
+|---|---|---|
+| G1 | Documentación técnica y código fuente entregables (el reto lo exige) | ⏳ |
+| G2 | Registro del costo de los componentes adicionales (el reto lo exige) | ⏳ |
+| G3 | Ensayo completo y autónomo, sin intervención humana (demostración) | ⏳ |
+| G4 | Plan B de red (hotspot/router propio 2.4 GHz) y lista de verificación del día de la competencia | ⏳ |
+| G5 | PR `develop → main` cuando el equipo decida la versión estable | ⏳ |
+
+---
+
+## 10. Tips para que funcione mejor
+
+<details>
+<summary><b>Contar cuadros: la cancha es su propia regla</b> (1 cuadro = 1 celda = 20 mm)</summary>
 
 | Qué quieres saber | Cómo contar | Qué debe dar |
 |---|---|---|
-| ¿La cancha está bien montada? | Contar cuadros **de centro a centro** de dos marcadores de esquina vecinos | **43 cuadros** (860 mm). El tablero físico tiene 50×50 cuadros, pero el área de juego son 43×43: los 7 de diferencia son el margen donde van los marcadores. Si da otro número, el montaje está mal; no ajustar el código para compensar. |
-| ¿La visión ubica bien? | Poner un cubo o rover en un cuadro conocido, contar desde el **centro del marcador 0** (origen) cuántos cuadros a la derecha (`col`) y hacia abajo (`row`), y comparar con lo que reporta `test_client.py` o la ventana | Coincidir con ≤ 1 cuadro de diferencia. Si `col` no sube al ir a la derecha o `row` no sube al ir hacia abajo, los marcadores están en orden equivocado. |
-| ¿Qué tan rápido va el rover? | Marcar un cuadro de salida, avanzar con potencia fija un tiempo medido (cronómetro) y **contar cuadros recorridos**; velocidad = cuadros ÷ segundos. Repetir 3 veces y promediar | Anotar el valor por rover y por potencia; compararlo con lo que asume el simulador (6 celdas/s a potencia 1.0, `VEL_MAX` en `pc_dev/simulador_fisico.py`). |
-| ¿Se desvía al ir "recto"? | Avanzar 20 cuadros y contar cuántos cuadros **de lado** se corrió | Desvío ≈ 0. Si siempre se corre al mismo lado, ajustar los factores de calibración izquierda/derecha de `firmware/motores.py`. |
-| ¿Cuánto gira? | Girar en el sitio un tiempo fijo y leer `theta` en la vista de la cámara antes y después | Grados por segundo por rover (el simulador asume 90°/s a potencia 1.0, `GIRO_MAX`). |
-| ¿A qué distancia "ve" el cubo el ultrasónico? | Poner el cubo a 1, 2, 3… cuadros del frente y leer el sensor (un cubo mide 3 cuadros de lado) | Fija `DISTANCIA_AGARRE_CM` en `firmware/config.py`. |
+| ¿La cancha está bien montada? | Contar cuadros **de centro a centro** de dos marcadores de esquina vecinos | **43 cuadros** (860 mm). El tablero físico tiene 50×50, pero el área de juego es 43×43. Si da otro número, el montaje está mal; no ajustar el código para compensar |
+| ¿La visión ubica bien? | Poner un cubo/rover en un cuadro conocido, contar desde el **centro del marcador 0** y comparar con `test_client.py` o la ventana | ≤ 1 cuadro de diferencia. Si `col` no sube al ir a la derecha o `row` al ir hacia abajo, los marcadores están en orden equivocado |
+| ¿Qué tan rápido va el rover? | Marcar un cuadro de salida, avanzar con potencia fija un tiempo medido y **contar cuadros**; velocidad = cuadros ÷ segundos; 3 veces y promediar | Anotar por rover y por potencia; comparar con el simulador (6 celdas/s) |
+| ¿Se desvía al ir "recto"? | Avanzar 20 cuadros y contar cuántos **de lado** se corrió | ≈ 0; si siempre al mismo lado, ajustar `_factor_izq/_factor_der` |
+| ¿Cuánto gira? | Girar en el sitio un tiempo fijo y leer `theta` antes y después | Grados/s por rover (el simulador asume 90°/s) |
+| ¿A qué distancia ve el cubo el ultrasónico? | Cubo a 1, 2, 3… cuadros del frente (mide 3 cuadros de lado) | Fija `DISTANCIA_AGARRE_CM` |
+</details>
 
-Anotar los resultados (rover, potencia, cuadros, segundos) en un archivo del repo, p. ej.
-`docs/calibracion.md`, para no repetir mediciones.
+<details>
+<summary><b>Movimientos muy suaves primero, optimizar después</b></summary>
 
-**2. Movimientos muy suaves primero, optimizar después.**
+- **Orden de pruebas, de menos a más riesgo:** ruedas en el aire → suelo, espacio libre, sin cubos → un cubo con un
+  solo rover → los dos. No pasar al siguiente hasta repetir 3 veces el actual sin fallos.
+- **`FACTOR_VELOCIDAD`** en `firmware/config.py` (hoy **0.5**) multiplica las velocidades de avance y de empuje.
+  Subirlo de 0.1 en 0.1, solo tras 3 corridas limpias. Si a un valor bajo las ruedas ni arrancan, el motor tiene una
+  **potencia mínima**: subir hasta que arranque y anotarla.
+- **Cambiar una sola cosa por prueba** y anotar qué se cambió.
+- **Lo que el factor NO suaviza:** los giros en el sitio (`w_max` y su piso en `comun/navegacion.py`) y la marcha atrás
+  (`VEL_RETROCESO` en `comun/planificador.py`); tampoco hay rampa de aceleración todavía.
+- **Siempre una forma de cortar:** interruptor de la batería de motores, `f` (stop) en la visión, `Ctrl-C` en el `repl`.
+- **Empuje suave = el cubo no se escapa:** en el simulador, el fallo más común es el cubo que resbala de lado.
+- **Cuando funcione a baja velocidad:** subir el factor hacia 1.0, reducir distancias de preagarre/rodeo, recalibrar el
+  simulador con lo medido y volver a correr `pytest`.
+</details>
 
-- **Orden de pruebas, de menos a más riesgo:** ruedas en el aire → suelo, espacio libre, sin cubos →
-  un cubo con un solo rover → los dos rovers. No pasar al siguiente hasta repetir 3 veces el actual sin
-  fallos.
-- **`FACTOR_VELOCIDAD` en `firmware/config.py`** (hoy **0.5**) multiplica las velocidades de avance y de
-  empuje del planificador. Empezar con 0.5 (o menos) y subirlo de 0.1 en 0.1 **solo** después de 3
-  corridas limpias. Si a un valor bajo las ruedas ni arrancan, el motor tiene una **potencia mínima**:
-  subirlo hasta que arranque y anotar ese valor.
-- **Cambiar una sola cosa por prueba** y anotar qué se cambió; si no, no se sabe qué arregló o rompió.
-- **Lo que el factor NO suaviza** (se edita a mano si hace falta aún más suavidad): los giros en el
-  sitio (`w_max` y el piso de giro en `comun/navegacion.py: comando_hacia_rumbo`) y la marcha atrás
-  (`VEL_RETROCESO` en `comun/planificador.py`). Tampoco hay **rampa de aceleración** todavía (los
-  arranques son bruscos): está en la lista de pendientes.
-- **Siempre una forma de cortar**: mano junto al interruptor de la batería de motores; `f` (stop) en la
-  vista de la cámara; `Ctrl-C` en el REPL del rover. El firmware frena los motores solo si se pierde la
-  telemetría por más de 0.5 s.
-- **Empuje suave = el cubo no se escapa.** En el simulador el caso que más falla es el cubo que se
-  resbala hacia un lado al empujarlo demasiado rápido.
-- **Después de que funcione a baja velocidad** se optimiza: subir `FACTOR_VELOCIDAD` hacia 1.0, reducir
-  distancias de preagarre/rodeo en `comun/planificador.py`, recalibrar los números del simulador con lo
-  medido y volver a correr `pytest`.
+---
 
-### Fase A — Sistema de visión y cámara (solo PC, sin rovers)
+## 11. Guía de la cámara y el sistema de visión
 
-Guías completas en el repo guía: `vision-system/MONTAJE.md`, `PUESTA_A_PUNTO.md`, `OPERACION.md`.
+Usamos el **sistema de visión del repo guía, sin modificarlo**: está clonado en `C:/Users/Allis/Documents/guia`, y lo
+único que se agregó ahí es la carpeta `.venv` (que su `.gitignore` ignora). Solo lo ejecutamos y leemos lo que publica.
 
-**Progreso (30-sep-2026):** pasos 1, 2 y 3 **hechos y verificados** en esta PC. El sistema de visión
-está en `C:/Users/Allis/Documents/guia/vision-system` (con su `.venv`); `verificar_geometria` da
-`TODO OK`; el mock + `test_client` intercambiaron 80 mensajes sin pérdidas; y nuestro
-`ejecutar_simulacion.py` leyó el mock real (el rover se queda quieto en `READY`, como debe).
-**Paso 5 (elegir cámara) hecho:** la webcam **Logitech C270** está conectada. Ojo: `--listar` dice
-`[0] Logi C270` y `[1] Integrated Camera`, pero **la que mira el tablero es el índice 1** (`--indice 1`; el
-índice 0 sale negro). El nombre no coincide con el número, tal como advierte el repo guía: se confirma
-**mirando la imagen**. Con `--indice 1 --camara logitech_c270` el sistema abre la C270 a 1280x720, el
-perfil sale *compatible* y publica en el puerto 2026.
+**Levantar la visión con la cámara real:**
 
 ```bash
 cd C:/Users/Allis/Documents/guia/vision-system
-set PYTHONIOENCODING=utf-8        # en cmd; en PowerShell: $env:PYTHONIOENCODING="utf-8"
+set PYTHONIOENCODING=utf-8        # cmd; en PowerShell: $env:PYTHONIOENCODING="utf-8"
 .venv\Scripts\python -m vision.sistema --indice 1 --camara logitech_c270 --ventana
 ```
 
-**Primer hallazgo con la cámara real:** en la primera imagen solo se veía completo **1 de los 4
-marcadores de esquina** (el ID 2); los otros estaban cortados por el borde o fuera de cuadro, y el
-sistema no publicó coordenadas (rovers y cubos vacíos). Se reubicó la cámara hasta ver los 4 (ver abajo).
+La ventana permite `r` (ready), `f` (stop), `a` (abort), `q` (salir). De `READY` a `RUNNING` pasa solo tras la
+preparación (60 s por defecto). Mientras no vea **los 4 marcadores de esquina completos** no publica rovers ni cubos.
+**Solo un programa puede usar la cámara a la vez.**
 
-**✅ Pasos 4, 5, 7 y 8 hechos y verificados con la cámara real (30-sep-2026):**
+<details>
+<summary><b>Qué hay que tener para la cámara y la cancha</b></summary>
 
-| Comprobación | Resultado |
+| Qué | Estado |
 |---|---|
-| Los 4 marcadores de esquina | Detectados (`Esquinas 4 de 4`), en **orden horario**: 0 arriba-izquierda, 1 arriba-derecha, 2 abajo-derecha, 3 abajo-izquierda |
-| Zonas y salida | Verde arriba, roja a la derecha, azul abajo, salida al centro del lado izquierdo (donde la organización las espera) |
-| Coordenadas | Contando celdas desde el marcador 0 a mano, el cubo rojo dio col ≈ 20, igual que la visión |
-| Sentido de los ejes | Al mover un cubo a la izquierda y hacia abajo: `col` bajó (34.3 → 23.3) y `row` subió (24.2 → 39.6) ✔ |
-| Veredicto de entrega | Cubo azul en (23.30, 39.57) → la visión lo marcó **EN POSICIÓN**; coincide con `mundo.cubo_en_su_zona` (banda col 18.6–24.4, row 37.6–40.9) |
-| Oclusión | Un cubo tapado (sombra/mano) se quedó con `edad 10100 ms` en naranja: la visión conserva la última posición. Nuestro código lo trata como poco confiable |
-| Rovers 10 y 11 | Ambos detectados, con el marcador hacia arriba y el frente a la derecha: **`theta` 358.4° y 358.7°** (posiciones (4.08, 17.39) y (4.25, 24.76), casi iguales a las de salida del simulador). El frente real del robot **coincide** con el "adelante" del marcador |
-| Sentido del giro | Girados a mirar hacia arriba del tablero: **`theta` 86.9° y 89.4°** → `theta` **sube en sentido antihorario**, como espera `comun/navegacion.py` |
+| Webcam USB externa (Logitech C270, `--indice 1`) | ✅ detectada y funcionando |
+| Soporte cenital: el repo guía trae `archivos_fabricacion/WebCam Base.stl` (impresión 3D, 4 tornillos con tuerca de 3/16" y 1 de 1/4", de 2 cm); un trípode sirve para probar | Por definir |
+| Cancha de 1 m × 1 m cuadriculada (celdas de 2 cm) | Armada para las pruebas |
+| 4 marcadores de esquina (IDs 0–3, de 10 cm, con margen blanco; `aruco/aruco_id0..3_negro10cm.pdf` impresos al 100 %) | Puestos y detectados |
+| Cubos de 6 cm rojo, verde y azul | En uso |
+| Stickers ArUco 10 y 11 en los rovers | Pegados y detectados |
+</details>
 
-Notas de esta prueba:
-- El sistema procesa a **~10 cuadros por segundo** a 1280x720 (publica a 20 Hz, pero el dato se refresca a 10). El
-  control actual lo tolera; tenerlo en cuenta al calibrar velocidades.
-- Un rover recién puesto tarda ~0.5 s en aparecer (la visión exige 5 cuadros estables) y aparecieron
-  detecciones falsas momentáneas de "rover 10" sobre la cuadrícula con la cancha vacía; se descartan solas.
-- **Solo un programa puede usar la cámara a la vez**: hay que cerrar el sistema de visión (`q` en la ventana)
-  antes de correr `diagnostico_camara`, la calibración o la medición de precisión.
-- Se usó el **perfil de cámara que ya trae el repo** (`logitech_c270`), aceptado como *compatible*. La
-  **calibración propia** (paso 6) queda **omitida por ahora**: se espera que la cámara del reto ya venga
-  calibrada. Si más adelante las posiciones salen corridas, se hace con la guía de abajo.
+<details>
+<summary><b>Calibración propia de la cámara (omitida por ahora; guía por si hace falta)</b></summary>
 
-**Qué hay que conseguir / conectar para los pasos 4 a 8** (nada de esto es para conectar los rovers):
+**Decisión (30-sep-2026): no se calibra por ahora**, porque se espera que la cámara del reto venga calibrada. Se usó el
+perfil que ya trae el repo (`logitech_c270`), aceptado como *compatible*. Si más adelante las posiciones salen corridas o
+se cambia de cámara, esta es la guía (detalle en `vision-system/PUESTA_A_PUNTO.md` del repo guía).
 
-| Qué | Para qué | Estado |
-|---|---|---|
-| **Webcam USB externa** (el repo trae perfiles para *Logitech C270* y *Argomtech CAM40*) | La cámara cenital | ✅ **Detectada** (Logi C270, `--indice 1`). Falta el soporte/altura para que vea los 4 marcadores. |
-| **Soporte para la cámara, mirando la cancha desde arriba** | Que vea los 4 marcadores de esquina completos. El repo trae una base para techo en `archivos_fabricacion/WebCam Base.stl` (impresión 3D, 4 tornillos con tuerca de 3/16" y 1 de 1/4", de 2 cm); un trípode o soporte improvisado sirve para probar. | Por definir |
-| **La cancha**: superficie de 1 m × 1 m cuadriculada (celdas de 2 cm) | Donde se mueven los rovers. Archivos: `archivos_fabricacion/cuadricula_1m_2cm_bn.svg` y `Cuadricula 1mx1m ArUco.pdf` | ¿Ya está impresa/armada? |
-| **4 marcadores de esquina** (IDs 0, 1, 2, 3, de 10 cm, con margen blanco) | Definen el sistema de coordenadas | Imprimir de `aruco/aruco_id0..3_negro10cm.pdf` **al 100 % de escala** y medir con regla |
-| **Cubos de 6 cm** rojo, verde y azul | Los objetos del reto (`archivos_fabricacion/cubos.dxf`) | ¿Ya están? |
-| Impresora, regla/cinta con mm, cartón o tabla rígida, cinta adhesiva | Calibración de la cámara (`PUESTA_A_PUNTO.md`) y pegar marcadores | — |
-| Los 2 rovers con sus stickers 10 y 11 | Paso 8 (verlos en la ventana). **Sin motores ni baterías**, solo ponerlos en la cancha | Stickers ya pegados |
+> **El repo guía no se modifica.** La herramienta guarda el perfil en `vision-system/vision/calibraciones/<nombre>.json`.
+> Para no pisar el `logitech_c270.json` que trae el repo, **usar un nombre propio**, p. ej. `"NullPointer C270"`.
 
-> En los pasos 4 a 8 los rovers **no necesitan estar conectados por USB ni encendidos**: solo se usan
-> como objetos con un marcador.
+Materiales: impresora, regla con mm, cartón o tabla lisa, pegamento (en **toda** la superficie), tijeras. Los PDF ya
+están en [`calibracion/`](calibracion/) (`patron.pdf` y `marcador_prueba.pdf`).
 
-1. ✅ **Clonar e instalar el sistema de visión** (Python ≥ 3.10) — *hecho*:
-   ```bash
-   git clone https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge.git ../Vision-Rover-Challenge
-   cd ../Vision-Rover-Challenge/vision-system
-   python -m venv .venv
-   .venv\Scripts\python -m pip install -r vision/requirements.txt      # Windows
-   ```
-2. ✅ **Comprobar la instalación** (no usa la cámara) — *hecho*. Debe terminar en `RESULTADO GENERAL: TODO OK`:
-   ```bash
-   .venv\Scripts\python -m vision.tools.verificar_geometria
-   ```
-3. ✅ **Probar el contrato sin cámara** — *hecho*: `python contrato/mock_publisher.py` en una terminal y
-   `python contrato/test_client.py` en otra (no requiere el venv). El mock **lee comandos por teclado y se
-   cierra si no tiene entrada** (p. ej. lanzado en segundo plano sin stdin): déjalo en una terminal
-   interactiva. Con `ready` pasa a `READY` y tras 60 s a `RUNNING`.
-4. **Montar la cancha** (`MONTAJE.md`): los 4 marcadores de esquina (IDs 0–3) pegados con su margen
-   blanco; los rovers con sus stickers (**10 y 11**, ya puestos); los cubos rojo/verde/azul.
-5. **Elegir la cámara**: `.venv\Scripts\python -m vision.tools.diagnostico_camara --listar` y luego
-   sin `--listar` para **mirar la imagen** (el índice no coincide con el orden del nombre). Anotar el
-   índice; si no es 0, usar `--indice N` en los comandos siguientes.
-6. ⏭️ **Calibrar la cámara — OMITIDO por ahora** (se espera cámara ya calibrada; guía en el paso 6 en detalle) (`PUESTA_A_PUNTO.md`, necesita imprimir el patrón, regla y cartón). Si el
-   repo ya trae un perfil para tu modelo (`vision/calibraciones/logitech_c270.json`,
-   `argomtech_cam40.json`), se puede usar ese.
-7. **Vista en vivo**: `.venv\Scripts\python -m vision.sistema --ventana` y comprobar mirando
-   (`MONTAJE.md` §6): los 4 marcadores detectados; el origen en el marcador 0; `col` aumenta hacia la
-   derecha y `row` hacia abajo (si no, los marcadores están en orden antihorario); la grilla
-   dibujada cae sobre la cuadrícula; las zonas (verde arriba, roja derecha, azul abajo) y la salida
-   (centro del lado izquierdo) están donde la organización espera.
-8. **Ver que los rovers se detectan**: poner un rover en la cancha y confirmar en la ventana los IDs
-   10 y 11 con su flecha de orientación. Mover uno hacia la derecha y comprobar que `col` sube;
-   girarlo antihorario y comprobar que `theta` sube. Con `python contrato/test_client.py` se ve el
-   mensaje v2 real.
-
-#### Paso 6 en detalle: calibrar la cámara (`PUESTA_A_PUNTO.md` del repo guía) — *solo si hace falta*
-
-> **Decisión (30-sep-2026): no se calibra por ahora**, porque se espera que la cámara del reto ya esté
-> calibrada. Esta guía queda por si las posiciones salen corridas o se cambia de cámara. Los PDF de
-> `calibracion/` ya están generados pero no hace falta imprimirlos todavía.
-
-Todo lente curva las líneas rectas y eso corre las posiciones que calcula la visión. Se mide cuánto
-curva **nuestra** cámara y se guarda como un perfil propio. Lo que sigue es lo que hay que hacer; el
-detalle y las explicaciones están en `vision-system/PUESTA_A_PUNTO.md`.
-
-> **Regla: el repo guía no se modifica.** La herramienta guarda el perfil en
-> `vision-system/vision/calibraciones/<nombre>.json`. Para no pisar el `logitech_c270.json` que trae el
-> repo, **usar un nombre propio**, p. ej. `"NullPointer C270"`, que crea un archivo nuevo (sin versionar) y
-> no toca ninguno existente. Después, copiar ese JSON a una carpeta de este repo como respaldo.
-
-Materiales: impresora, regla con mm, cartón/cartulina gruesa o tabla lisa, pegamento (en **toda** la
-superficie), tijeras. Los PDF ya están generados en [`calibracion/`](calibracion/):
-`patron.pdf` (3 páginas: 2 del ajedrezado + instrucciones) y `marcador_prueba.pdf` (ID 20, 60 mm).
-
-1. **Imprimir al 100 % de escala** (nunca "ajustar a la página") y **medir con la regla la línea de 100 mm**
-   que trae cada hoja al pie. Si no mide 100 mm, reimprimir: no seguir.
-2. **Armar el patrón**: cortar una hoja por la línea gris, pegar las dos **a tope** (sin escalón ni hueco) y
-   pegar todo sobre cartón rígido, **plano** (cada ondulación se toma como distorsión del lente). Recortar el
-   marcador de prueba **dejando su borde blanco** y pegarlo también plano.
-3. **Cerrar el sistema de visión** (tecla `q` en su ventana): la cámara solo la puede usar un programa a la vez.
-4. **Calibrar** (desde `C:/Users/Allis/Documents/guia/vision-system`, con `PYTHONIOENCODING=utf-8`):
-   ```bash
-   .venv\Scripts\python -m vision.tools.calibrar_camara --indice 1 --camara "NullPointer C270"
-   ```
-   Mostrar el patrón en posiciones **variadas**: las 9 zonas del cuadro (sobre todo las esquinas), 3
-   distancias y al menos 4 vistas inclinadas. Seguir la línea `>` del panel, no el contador de capturas;
-   cuando diga "ya alcanza", apretar `C`. Esperar el veredicto: **EXCELENTE/BUENA** sirven; **MALA** no
-   guarda el perfil (casi siempre es que el patrón no estaba plano).
-5. **Verificar a ojo**: `... calibrar_camara --verificar --indice 1 --camara "NullPointer C270"` muestra la imagen
-   original y la corregida con una rejilla recta; las líneas del tablero deben quedar rectas a la derecha.
-6. **Medir la precisión**: `... precision_ubicacion --camara "NullPointer C270"` (usa el marcador de prueba
-   sobre el tablero, alineado a la cuadrícula). Contar cuadros da la distancia real (ver los tips). Anotar el
-   error en mm en `docs/calibracion.md`.
-7. **Usar el perfil nuevo**: lanzar la visión con `--camara "NullPointer C270"` en vez de `logitech_c270` y
-   repetir la comprobación de los rovers (pasos 7 y 8): las posiciones y los `theta` deben seguir igual o
-   mejorar.
-
-### Fase B — Rover con ruedas en el aire, telemetría simulada
-
-**Progreso Fase B (30-sep-2026):**
-- **Red elegida: `Visitas`** (WPA2 con contraseña). El escaneo del rover mostró que el ESP32 solo ve canales 1, 4, 7 y 10
-  (**solo 2.4 GHz**, como dice la especificación del chip); la PC va por 5 GHz de la misma red y aun así se ven.
-  `Administrativo` también sirve en 2.4 GHz; `ExpoRobots` **no** es una red del reto (nombre visto en el escaneo, el repo guía no lo menciona).
-- **Firmware desplegado y conectado a la visión en los DOS rovers** (18 archivos, tamaño verificado). Al reiniciar cada
-  uno imprimió `rover 10|11 conectando WiFi...` y `conectado a vision 192.168.51.119 2026`, y la visión los listó como
-  clientes (`192.168.51.8` y `192.168.50.193`): **misma red, sin aislamiento entre dispositivos**. La IP de la PC de
-  visión (`VISION_HOST`) se obtiene con `ipconfig` y cambia si la PC cambia de red.
-- Las credenciales van **solo** en `firmware/settings.toml` (Git lo ignora). **No** escribirlas en
-  `settings.toml.example`, que sí se sube al repo.
-- **LED:** se descubrió que el LED real está en **IO33** (no en `board.NEOPIXEL`/IO2) y que el rojo mezclado se
-  pierde; se rehízo la paleta con parpadeos y `PIN_IR = None` para no chocar con IO33 (ver la sección del LED).
-  También se corrigió un error real: `Motores` y `Sensores` creaban cada uno su `IdeaBoard()` y la segunda fallaba
-  en el rover; ahora hay una sola (`firmware/placa.py`) y un test que lo vigila.
-
-**Estado de cada rover al cerrar esta sesión (30-sep-2026):**
-
-| | Rover 1 (ID 10, UID `…7C84`) | Rover 2 (ID 11, UID `…6A87`) |
-|---|---|---|
-| Firmware | Desplegado con la paleta LED nueva (IO33) | ⚠️ **Despliegue interrumpido**: el puerto USB se cayó copiando `comun/navegacion.py`, que pudo quedar truncado. **Hay que repetir `desplegar.py --si`** antes de usarlo |
-| LED | IO33 confirmado (GRB); paleta nueva sin ver aún | **Pin sin confirmar** (se probaron IO2/IO32/IO33 pero no se anotó el resultado); probar con `probar_led.py` después de redesplegar |
-| Telemetría | Conectado a la visión | Conectado a la visión (con el firmware anterior) |
-
-Al final de la sesión **ningún rover aparecía conectado por USB** (`mpremote connect list` vacío); volver a conectarlos.
-
-**Siguientes pasos, en orden:**
-1. Reconectar los rovers y **volver a desplegar el rover 2**; verificar sus 18 archivos.
-2. `probar_led.py` en cada rover: confirmar la paleta nueva y el pin del LED del rover 2 (si no es IO33, probar IO2/IO32
-   uno por uno y ajustar `PIN_LED`; el pin podría ser distinto por rover → tabla por MAC en `config.py`).
-3. **Primera prueba de movimiento, ruedas en el aire**, baterías de motores encendidas, USB conectado, una mano en el
-   interruptor: en la ventana de la visión pulsar `r` (ready); tras 60 s pasa solo a `RUNNING`; el rover 10 debe ir
-   hacia el cubo rojo y el 11 hacia el verde (con `FACTOR_VELOCIDAD = 0.5`). Comprobar el sentido de giro y que `f`
-   (stop) o `FINISHED` **frenan** las ruedas.
-4. Quitar el USB y repetirlo con el LED como única pista; luego pasar a la Fase C (calibración contando cuadros).
-
-9. **Red**: la PC y los rovers deben estar en la **misma red WiFi de 2.4 GHz** (el ESP32 no usa 5 GHz).
-   Averiguar la IP de la PC (`ipconfig`) y **permitir el puerto 2026** en el firewall de Windows.
-   Levantar el `mock_publisher.py` (escucha en `0.0.0.0:2026`).
-10. **Probar el controlador en la PC contra el mock** (sin rover):
-    ```bash
-    python pc_dev/ejecutar_simulacion.py --host 127.0.0.1 --port 2026 --id 10
-    ```
-    Debe mostrar estados y ruedas `(izq, der)`. (El mock no reacciona a las ruedas: es solo para ver
-    la decisión.)
-11. **`settings.toml` en cada rover** (copiar `firmware/settings.toml.example` y completar con el WiFi
-    real y `VISION_HOST` = IP de la PC). Se copia con
-    `python -m mpremote connect COM3 fs cp settings.toml :settings.toml`. **No subirlo al repo**
-    (está en `.gitignore`).
-12. **Respaldar y desplegar** el rover 1 (un rover primero):
-    ```bash
-    python herramientas/respaldar_rover.py COM3 rover1      # ya hecho, repetir si hay dudas
-    python herramientas/desplegar.py COM3                    # revisar la lista
-    python herramientas/desplegar.py COM3 --si
-    ```
-13. **Ver el arranque**: con el rover **levantado (ruedas en el aire)**, reiniciarlo y abrir
-    `python -m mpremote connect COM3 repl`. Debe imprimir `rover 10 conectando WiFi...` y
-    `conectado a vision <IP> 2026`, y después, al cambiar la fase, los estados
-    (`READY`/`RUNNING` + estado). Si aborta, el mensaje dice por qué (p. ej. falta `VISION_HOST`).
-14. **Con la cámara real, rover levantado**: en la ventana de visión dar `r` (ready); tras la
-    preparación (1 min por defecto, configurable en `vision/config_vision.json`, bloque `ronda`) pasa a
-    `RUNNING` solo. Verificar que las ruedas reaccionan coherentemente: poner un cubo, y ver que el
-    rover intenta girar hacia donde está (mover el rover a mano no cambia nada; el objetivo es ver el
-    sentido de giro). Comprobar que `f` (stop) o `FINISHED` **frena** las ruedas.
-15. **Repetir 12–14 con el rover 2** (`COM12`).
-
-### Fase C — Calibración con los rovers
-
-16. **Potencia mínima y velocidad** (contando cuadros, ver los tips de arriba): con el rover en el suelo y un espacio libre, medir cuánta potencia
-    hace falta para arrancar y cuánto avanza por segundo a 0.5, 0.7 y 1.0; y cuánto gira por segundo
-    en el sitio. Ajustar `_factor_izq/_factor_der` en `motores.py` hasta que avance recto y actualizar
-    las constantes del simulador (`VEL_MAX`, `GIRO_MAX`) con lo medido.
-17. **Offset del marcador**: comparar la posición que reporta la visión con la del chasis
-    (`vision/mediciones/desfases_*.json`).
-18. **Agarre**: con un cubo delante, leer el ultrasónico (`python -m mpremote connect COM3 exec ...`
-    con `hcsr04`) a distintas distancias y fijar `DISTANCIA_AGARRE_CM`.
-
-### Fase D — Prueba real en cancha (escalonada)
-
-19. **Un rover, un cubo, sin el otro** (el otro apagado o fuera). Cubo cerca y depot cercano.
-    Cronómetro y mano sobre el botón de apagado. Esperado: aproxima, empuja, entrega, retrocede.
-    Anotar qué falla (agarre, giro, cubo que se escapa) y ajustar constantes en `planificador.py`.
-    Reproducir el fallo en `simulador_fisico.py` si es posible, arreglar, correr `pytest`, redesplegar.
-20. **Un rover, su cola completa** (rover 1: rojo y azul).
-21. **Los dos rovers, cada uno con su color**, cubos lejos entre sí (sin cruces).
-22. **Escenario completo** (config del repo guía: 3 cubos, salida a la izquierda) y medir el tiempo con
-    el cronómetro oficial de la visión (`vision/actas/` guarda un acta por ronda).
-
-### Fase E — Lo complicado
-
-23. Negociación por ESP-NOW y reasignación dinámica; evitación de colisiones robusta; búsqueda de
-    cubos ocluidos; usar la IMU. Cada uno con tests en el simulador **antes** de ir al robot.
+1. **Imprimir al 100 % de escala** (nunca "ajustar a la página") y **medir con la regla la línea de 100 mm** de cada hoja.
+2. **Armar el patrón**: cortar una hoja por la línea gris, pegarlas **a tope** y sobre cartón rígido, **plano**.
+3. **Cerrar la visión** (`q`): la cámara solo la usa un programa a la vez.
+4. **Calibrar**: `.venv\Scripts\python -m vision.tools.calibrar_camara --indice 1 --camara "NullPointer C270"`;
+   mostrar el patrón en las 9 zonas del cuadro, 3 distancias y ≥ 4 vistas inclinadas; seguir la línea `>` del panel;
+   cuando diga "ya alcanza", apretar `C`. **EXCELENTE/BUENA** sirven; **MALA** no guarda el perfil.
+5. **Verificar a ojo**: `... calibrar_camara --verificar --indice 1 --camara "NullPointer C270"`.
+6. **Medir la precisión**: `... precision_ubicacion --camara "NullPointer C270"`.
+7. **Usar el perfil nuevo**: lanzar la visión con `--camara "NullPointer C270"` y repetir la comprobación de los rovers.
+</details>
 
 ---
 
-## 8. Problemas conocidos y soluciones
+## 12. Problemas conocidos y soluciones
+
+<details>
+<summary><b>Ver la tabla completa</b> (Windows, mpremote, rovers, red, cámara)</summary>
 
 | Síntoma | Causa y solución |
 |---|---|
-| `python` abre la Microsoft Store o "no está instalado" | Alias de ejecución de la Store intercepta `python.exe`. Desactivar los alias de `python.exe`/`python3.exe` en Configuración → Aplicaciones → Alias de ejecución, o llamar al intérprete real por ruta completa. |
-| `pip install mpremote` falla con `WinError 2 ... pyserial-miniterm.exe.deleteme` | Sin permisos en `C:\Python312\Scripts`. Usar `pip install --user mpremote` y ejecutarlo como `python -m mpremote`. |
-| `mpremote` → `could not enter raw repl` | El rover está corriendo un `code.py` con bucle infinito. Mandar Ctrl-C por serial (las herramientas del repo lo hacen solas). |
-| `mpremote` no ve el puerto / "access denied" | Thonny u otro programa tiene el puerto abierto. Cerrarlo. |
-| `git clone` falla con `Filename too long` | Clonar en una ruta corta, p. ej. `C:\Users\<usuario>\Documents\Null-Pointer`. |
-| `fs ls` de mpremote da error `ilistdir` | CircuitPython no lo soporta; listar con `os.listdir` vía `exec` (lo hace `respaldar_rover.py`). |
-| En el ESP-NOW de CircuitPython, `e.send(...)` devuelve falsy aunque el mensaje llegó | Es normal: el valor no indica éxito. Verificar del lado receptor. |
-| El `mock_publisher.py` se cierra solo / `test_client` da `WinError 10061` | El mock lee comandos por stdin y termina si no hay entrada. Correrlo en una terminal normal (no en segundo plano) y esperar ~3 s antes de conectar el cliente. |
-| `vision.sistema` se cae con `UnicodeEncodeError ... '✓'` | Windows usa una codificación que no tiene el símbolo ✓ (pasa sobre todo al redirigir la salida). Definir `PYTHONIOENCODING=utf-8` antes de lanzarlo. |
-| `mpremote fs cp` falla con `OSError: [Errno 2] No such file/directory` al copiar al rover | En CircuitPython falla si el archivo destino **aún no existe** (solo copia si ya existía, como el `settings.toml` de fábrica). `herramientas/desplegar.py` ya no usa `fs cp`: escribe cada archivo con `open()` desde un `exec` (`_rover.subir`) y verifica el tamaño. |
-| Dejé la contraseña del WiFi en `settings.toml.example` | Ese archivo **se sube al repo**. Mover los datos a `firmware/settings.toml` (ignorado) y restaurar el ejemplo con `git checkout -- firmware/settings.toml.example`. Si ya se hizo commit/push con la clave, cambiarla en el router. |
-| Los números de COM cambian entre conexiones (el rover 2 pasó a `COM3`) | Identificar cada rover por su **UID/MAC** (`herramientas/info_rover.py`), no por el COM. |
-| `IdeaBoard` falla con "pin in use" | Se creó la placa dos veces. Todo el firmware la pide por `firmware/placa.py` (una sola instancia); no hacer `IdeaBoard()` en otros módulos. |
-| `diagnostico_camara --listar` solo muestra `Integrated Camera` | La webcam USB externa no está conectada, o Windows no le dio permiso de cámara. Conectarla y repetir. |
-| El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover. |
-| `RuntimeError: MAC desconocida` al arrancar | Una placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py`. |
-| El rover no conecta al WiFi | Red de 5 GHz (usar 2.4), SSID/clave mal escritos en `settings.toml`, o PC en otra red. |
-| El rover conecta pero no recibe telemetría | Firewall de Windows bloqueando el puerto 2026 en la PC de visión, o IP equivocada. |
+| `python` abre la Microsoft Store o "no está instalado" | El alias de la Store intercepta `python.exe`. Desactivar los alias de `python.exe`/`python3.exe` (Configuración → Aplicaciones → Alias de ejecución) o llamar al intérprete real por ruta |
+| `pip install mpremote` falla con `WinError 2 ... pyserial-miniterm.exe.deleteme` | Sin permisos en `C:\Python312\Scripts`. Usar `pip install --user mpremote` y ejecutarlo como `python -m mpremote` |
+| `mpremote` → `could not enter raw repl` | El rover corre un `code.py` con bucle infinito. Mandar Ctrl-C por serial (las herramientas del repo lo hacen solas) |
+| `mpremote` no ve el puerto / "access denied" | Thonny u otro programa tiene el puerto abierto. Cerrarlo |
+| Los números de COM cambian entre conexiones | Identificar cada rover por **UID/MAC** (`info_rover.py`), no por el COM |
+| `mpremote fs cp` falla con `OSError: [Errno 2]` al copiar al rover | En CircuitPython falla si el destino **aún no existe**. `desplegar.py` ya no lo usa: escribe con `open()` desde un `exec` y verifica el tamaño |
+| `fs ls` de mpremote da error `ilistdir` | CircuitPython no lo soporta; listar con `os.listdir` vía `exec` |
+| Despliegue interrumpido (cable suelto) | El rover queda con archivos mezclados o truncados. **Repetir `desplegar.py --si` completo** |
+| `IdeaBoard` falla con "pin in use" | Se creó la placa dos veces. Todo el firmware la pide por `firmware/placa.py` |
+| El LED no se enciende con `board.NEOPIXEL` | En estos rovers ese pin (IO2) no muestra nada; el LED está en IO33 (`config.PIN_LED`) |
+| El firmware se cae al arrancar por el pin IO33 | IO33 es el LED; no usarlo para otro periférico (`PIN_IR = None`) |
+| `e.send(...)` de ESP-NOW devuelve falsy aunque el mensaje llegó | Es normal en CircuitPython: verificar del lado receptor |
+| El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover (LED rojo fijo) |
+| `RuntimeError: MAC desconocida` al arrancar | Placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py` |
+| El rover no conecta al WiFi | Red de 5 GHz (usar 2.4), SSID/clave mal escritos en `settings.toml`, o la PC está en otra red |
+| El rover conecta pero no recibe telemetría | Firewall de Windows bloqueando el puerto 2026, o IP equivocada (la IP de la PC cambia al cambiar de red) |
+| Dejé la contraseña del WiFi en `settings.toml.example` | Ese archivo **se sube al repo**. Mover los datos a `firmware/settings.toml` (ignorado) y `git checkout -- firmware/settings.toml.example`. Si ya se subió, cambiar la clave en el router |
+| `git clone` falla con `Filename too long` | Clonar en una ruta corta, p. ej. `C:\Users\<usuario>\Documents\Null-Pointer` |
+| Los PDF se dañan al clonar en Windows | Marcados como binarios en `.gitattributes` |
+| `mock_publisher.py` se cierra solo / `test_client` da `WinError 10061` | El mock lee comandos por stdin y termina si no hay entrada. Correrlo en una terminal normal y esperar ~3 s |
+| `vision.sistema` se cae con `UnicodeEncodeError ... '✓'` | Definir `PYTHONIOENCODING=utf-8` antes de lanzarlo |
+| `diagnostico_camara --listar` no muestra la webcam externa | No está conectada o Windows no le dio permiso. Conectarla y repetir |
+| La cámara muestra la imagen negra | Índice equivocado: el orden de los nombres no coincide con `--indice` (la C270 es el 1). Confirmar **mirando la imagen** |
+| La visión no publica rovers ni cubos | No ve los 4 marcadores de esquina completos: reubicar la cámara |
+| Un rover recién puesto tarda en aparecer | La visión exige ~5 cuadros estables (~0.5 s); también descarta solas las detecciones falsas sobre la cuadrícula |
+</details>
 
 ---
 
-## 9. Flujo de trabajo con git
+## 13. Flujo de trabajo con git
 
-- `main`: vacía a propósito por ahora (solo el commit inicial). **No hay PR a `main` todavía** —
-  se hará cuando el equipo decida una versión estable.
-- `develop`: rama de integración; todo entra por PR (PRs #1–#5 ya fusionados).
-- Ramas de trabajo: `feat/...`, `fix/...`, `chore/...`, siempre contra `develop`.
+- `main`: vacía a propósito por ahora (solo el commit inicial). **No hay PR a `main` todavía.**
+- `develop`: rama de integración; todo entra por PR (#1–#13 ya fusionados, sin ramas ni PRs pendientes).
+- Ramas de trabajo: `feat/...`, `fix/...`, `chore/...`, `docs/...`, siempre contra `develop`.
 - Commits con `Co-Authored-By` cuando los escribe Claude Code.
-- El `settings.toml` de los rovers (WiFi) está en `.gitignore`: **no subirlo**.
+- **Nunca subir:** `firmware/settings.toml` (WiFi), `fotos/` (capturas de la cámara). Ambos están en `.gitignore`.
 
 ---
 
-## 10. Referencias
+## 14. Referencias
 
 - Repo guía del reto (reglas, specs, sistema de visión): [Vision-Rover-Challenge](https://github.com/Universidad-Cenfotec/Vision-Rover-Challenge)
-  — `el_reto.md`, `robot.md`, `reglamento.md`, `vision-system/contrato/CONTRATO.md`, `codigos/` (ejemplos de
-  PID, IMU, color, ESP-NOW que aún no adaptamos).
+  — `el_reto.md`, `robot.md`, `reglamento.md`, `vision-system/contrato/CONTRATO.md`, `codigos/` (ejemplos de PID,
+  IMU, color y ESP-NOW que aún no adaptamos).
 - Protocolo de telemetría (resumen propio): [`docs/contrato_telemetria.md`](docs/contrato_telemetria.md)
 - Arquitectura y decisiones: [`docs/arquitectura.md`](docs/arquitectura.md)
 - Firmware y despliegue: [`firmware/README.md`](firmware/README.md)
