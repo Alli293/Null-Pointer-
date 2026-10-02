@@ -1,12 +1,14 @@
-"""Cliente TCP NDJSON del sistema de vision, para MicroPython (ESP32).
+"""Cliente TCP NDJSON del sistema de vision, para CircuitPython (ESP32).
 
 Implementa el buffering de lineas y la politica de "quedarse solo con el
 ultimo mensaje" del contrato (Reglas 1 y 3 -- ver docs/contrato_telemetria.md).
-Usa unicamente el modulo `socket`, disponible en el port ESP32 de MicroPython.
+Usa `socketpool` (CircuitPython) en vez del modulo `socket` de MicroPython --
+verificado en banco contra el simulador del reto.
 """
 
 import json
-import socket
+import socketpool
+import wifi
 
 
 class ClienteVision:
@@ -14,12 +16,14 @@ class ClienteVision:
         self.host = host
         self.port = port
         self.tamano_buffer = tamano_buffer
+        self._pool = socketpool.SocketPool(wifi.radio)
         self._sock = None
         self._buffer = b""
 
     def conectar(self):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.connect(socket.getaddrinfo(self.host, self.port)[0][-1])
+        self._sock = self._pool.socket(self._pool.AF_INET, self._pool.SOCK_STREAM)
+        self._sock.connect((self.host, self.port))
+        self._sock.settimeout(0)  # no bloqueante: el loop principal no puede trabarse
         self._buffer = b""
 
     def cerrar(self):
@@ -33,10 +37,6 @@ class ClienteVision:
         en el mismo drenado (politica de buffer unico, Regla 3).
 
         Devuelve None si no hay ningun mensaje completo nuevo todavia.
-
-        TODO: en MicroPython, poner el socket en no bloqueante
-        (self._sock.setblocking(False)) para que esto no trabe el loop
-        principal cuando no hay datos aun.
         """
         try:
             chunk = self._sock.recv(self.tamano_buffer)

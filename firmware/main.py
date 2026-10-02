@@ -1,9 +1,10 @@
-"""Loop principal del rover: conectar, leer telemetria, decidir, actuar.
+"""Loop principal del rover (CircuitPython): conectar, leer telemetria,
+decidir, actuar.
 
-Estado actual: esqueleto funcional -- conecta y corre la maquina de estados de
-comun/, pero las acciones de motor concretas dependen de firmware/movimiento.py
-y firmware/sensores.py, que hoy son stubs (ver TODOs ahi) hasta tener el robot
-en banco de pruebas.
+Estado actual: WiFi hacia el sistema de vision y ESP-NOW entre los dos rovers
+quedaron verificados en banco de pruebas (ver docs/arquitectura.md). Lo que
+sigue pendiente de banco es la geometria fina de acercamiento/agarre
+(firmware/movimiento.py) y el sensor de color (firmware/sensores.py).
 """
 
 from firmware import config
@@ -24,18 +25,16 @@ from comun.maquina_estados import (
 
 
 def conectar_wifi():
-    # TODO: import network; activar STA_IF; connect(config.WIFI_SSID, ...);
-    # esperar a isconnected(). Se deja fuera del esqueleto porque no es
-    # observable/probable sin hardware real.
-    pass
+    import wifi
+    wifi.radio.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
 
 
 def ahora_ms():
-    # TODO: en MicroPython real, utime.ticks_ms() es un contador monotonico
-    # (no epoca), lo cual es exactamente lo que necesita EstimadorLatencia
-    # (solo le importa la diferencia entre muestras, no el valor absoluto).
-    import utime
-    return utime.ticks_ms()
+    # time.monotonic() es un contador monotonico en segundos (no epoca) en
+    # CircuitPython -- exactamente lo que necesita EstimadorLatencia (solo le
+    # importa la diferencia entre muestras, no el valor absoluto).
+    import time
+    return int(time.monotonic() * 1000)
 
 
 def main():

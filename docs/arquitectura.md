@@ -77,5 +77,14 @@ Puntos importantes:
 - **Geometría fina de acercamiento/agarre** (orientación relativa, evasión de
   obstáculos, corrección con PID) — vive en `firmware/movimiento.py`, fuera de
   `comun/` a propósito porque depende de las paletas/sensores físicos del kit.
-- **Pines y calibración de motores** — quedan como `TODO` explícitos en
-  `firmware/config.py` hasta tener el robot en banco.
+  Hoy es bang-bang simple; falta adaptar el PID de `codigos/code_PID.py` del
+  repo guía.
+- **Sensor de color** (`firmware/sensores.py: leer_color()`) — el kit no trae
+  chip de color por I2C (confirmado por escaneo en banco: solo aparece el IMU
+  en `0x6B`), así que va por luz analógica + NeoPixel
+  (`codigos/color_detect.py`), pendiente de calibración por robot.
+- **Pines de motores/sensores y firmware base** — confirmados en banco de
+  pruebas: motores, IR, ultrasónico e IMU responden, y WiFi hacia el sistema
+  de visión y ESP-NOW entre los dos rovers ya se probaron funcionando (ver
+  `firmware/README.md`). El firmware corre sobre **CircuitPython**, no
+  MicroPython — el kit lo trae así de fábrica.
