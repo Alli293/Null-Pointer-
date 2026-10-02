@@ -29,7 +29,7 @@ color en su zona, coordinándose entre sí. Un sistema de visión externo (cáma
 | LED de estado | ⚠️ | Pin IO33 confirmado en rover 1; paleta nueva sin ver; rover 2 sin confirmar |
 | Movimiento con el firmware completo | ⏳ | Primera prueba (ruedas en el aire) es el siguiente paso |
 | Sensor de agarre (ultrasónico) | ⏳ | Sin probar ni calibrar (`DISTANCIA_AGARRE_CM` es un número inventado) |
-| Sensor de color / IMU | ⏳ | Sin integrar |
+| Módulo de luz (presencia, no color) / IMU / IR | ⏳ | Sin integrar; **no hay chip de color** (notas de banco) |
 | Coordinación entre rovers por ESP-NOW | ⏳ | Hoy el reparto de colores es fijo (rover 10: rojo y azul; rover 11: verde) |
 | Evitación de colisiones robusta | ⏳ | Hoy solo una regla simple de ceder el paso |
 | Calibración propia de la cámara | ⏭️ | Se espera que la cámara del reto ya venga calibrada |
@@ -105,7 +105,7 @@ Si clonas el repo en otra PC (o mañana en la misma), **hay cosas que Git ignora
 | [`herramientas/`](herramientas/) | PC, habla con los rovers por USB | `info_rover.py`, `respaldar_rover.py`, `probar_motores.py`, `probar_led.py`, `desplegar.py`. |
 | [`rover_original/`](rover_original/) | — | Respaldo del contenido de fábrica de cada rover (`rover1/`, `rover2/`), para restaurarlos. |
 | [`calibracion/`](calibracion/) | — | PDF del patrón de calibración de cámara (generados, **no hace falta imprimirlos** por ahora). |
-| [`docs/`](docs/) | — | [`contrato_telemetria.md`](docs/contrato_telemetria.md) (protocolo v2) y [`arquitectura.md`](docs/arquitectura.md). |
+| [`docs/`](docs/) | — | [`contrato_telemetria.md`](docs/contrato_telemetria.md) (protocolo v2), [`arquitectura.md`](docs/arquitectura.md) y [`notas_banco_sensores.md`](docs/notas_banco_sensores.md) (mediciones de sensores y ESP-NOW hechas en **otros dos rovers** de banco, COM6/COM7: hay que **re-verificarlas en los nuestros**). |
 | [`simulacion/`](simulacion/) | — | Cómo usar el `mock_publisher` del repo guía. |
 
 **Idea central:** la lógica (`comun/`) se escribe una sola vez, se prueba con `pytest` en la PC y se copia
@@ -166,6 +166,10 @@ Todo está en `develop`, entrado por PR:
   método propio que verifica el tamaño.
 - El `board.NEOPIXEL` de la IdeaBoard (IO2) **no muestra nada**; el LED que responde está en **IO33**, con orden
   de colores GRB, y en el rover 1 el **rojo mezclado con otros colores se pierde**.
+- El "sensor de color" **no es un chip de color**: es un módulo con NeoPixel + fototransistor que solo detecta presencia, y su
+  NeoPixel (IO33) es justo el LED de estado. **Hay un conflicto de diseño:** el mismo LED sirve de indicador y de iluminación
+  del sensor de presencia (para medir se enciende en blanco), así que usar el módulo como sensor de agarre obligará a
+  repartir el LED (ver el plan, D6 y F4).
 - El ESP32 **solo trabaja en 2.4 GHz** (medido con un escaneo desde el propio rover: solo ve canales 1–13).
 - La numeración de `--indice` de la cámara **no coincide con el orden de los nombres** (la C270 es el índice 1).
 - Los números de puerto COM **cambian** al reconectar: se identifica cada rover por UID/MAC.
@@ -237,11 +241,11 @@ No reemplaza al `mock_publisher.py` del repo guía (que publica telemetría real
 | Motor 1 (**rueda izquierda**) | IO12 / IO14 | ✅ |
 | Motor 2 (**rueda derecha**) | IO13 / IO15 | ✅ |
 | **LED de estado (NeoPixel)** | **IO33**, orden GRB | ✅ rover 1 · ⏳ rover 2 |
-| Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 (código de fábrica) | ⏳ sin probar |
-| Infrarrojo | El ejemplo de fábrica lo pone en IO33 (el pin del LED): **no se usa** (`PIN_IR = None`) | — |
+| Ultrasónico HCSR04 | TRIG IO26, ECHO IO25 (código de fábrica). **Las notas de banco midieron TRIG IO25 / ECHO IO26** (invertidos) con el jumper SELECT–Vin puesto: si no lee, intercambiarlos | ⏳ sin probar |
+| Infrarrojos | El ejemplo de fábrica pone **uno** en IO33 (el pin del LED): **no se usa** (`PIN_IR = None`). Las notas de banco midieron **4 IR analógicos**: IO36 e IO39 (adelante izq/der), IO34 e IO35 (atrás izq/der) | ⏳ sin probar, sin usar |
 | `board.NEOPIXEL` de la IdeaBoard | IO2 — **no muestra nada** en estos rovers | ✅ |
-| IMU | I2C, librería `adafruit_lsm6ds` | ⏳ sin integrar |
-| Sensor de color | I2C (Qwiic) | ⏳ sin integrar |
+| IMU | I2C (Qwiic), chip **LSM6DS3TRC** en la dirección `0x6B` (librería `adafruit_lsm6ds`) | ⏳ sin integrar |
+| **Módulo de luz / "color"** (VCC, DI, AO, GND) | NeoPixel (DI) + fototransistor analógico (AO). El diagrama oficial dice DI→IO32 y AO→IO4, pero el NeoPixel real está en **IO33** (**es el mismo LED que usamos como indicador**). **No hay chip de color por I2C** y el módulo **no distingue color de forma confiable, solo presencia** | ⏳ sin integrar |
 
 Librerías ya en `/lib` de ambos: `ideaboard`, `hcsr04`, `adafruit_motor`, `adafruit_lsm6ds`, `neopixel`, `simpleio`,
 `adafruit_requests`, etc. **Contenido de fábrica:** `code.py` (prueba de LED), `prueba.py` (LED + motores + I2C) y
@@ -357,9 +361,13 @@ primer arranque sin USB. La PC de visión debe seguir encendida y en la misma re
 | El firmware completo **moviendo ruedas**, con telemetría real | Fase C del plan |
 | `READY` → `RUNNING` y los estados del FSM con telemetría real | Fase C |
 | Que el estimador de latencia no descarte mensajes buenos por WiFi real | Fase C: el rover debe reaccionar y no quedarse en LED rojo lento |
-| Que ESP-NOW convive con la conexión WiFi (mismo canal que el router) | Antes de usarlo en `main.py` (Fase F) |
+| Que ESP-NOW convive con la conexión WiFi | **Riesgo conocido (notas de banco):** con el WiFi de la visión conectado en otro canal, los mensajes **no llegaban**. Para fijar el canal sin asociarse a ningún WiFi hizo falta `wifi.radio.start_ap(" ", "", channel=6, max_connections=0)` + `wifi.radio.stop_ap()` y luego `espnow.Peer(mac=..., channel=6)`. `comm_espnow.py` no fija canal todavía. Probar antes de usarlo en `main.py` (Fase F) |
 | Ultrasónico: dónde apunta y a qué distancia detecta el cubo | Leer el sensor con un cubo a 1, 2, 3… cuadros |
 | Que la cámara de la competencia venga calibrada | Preguntar a los organizadores |
+| **Ultrasónico: orden de TRIG/ECHO** (fábrica IO26/IO25 vs banco IO25/IO26) y jumper SELECT–Vin | Leerlo con un cubo delante; si no lee, intercambiar los pines |
+| **Módulo de luz como sensor de presencia del cubo** (umbral ~800 sobre escala de 16 bits; con el cubo a distancia de agarre el cambio fue > 1500) y que cada módulo no esté dañado (en un rover de banco el canal verde del NeoPixel y el fototransistor fallaban) | Medir encendido blanco vs apagado con/sin cubo en cada rover y revisar el módulo físicamente |
+| **IR analógicos** (IO36, IO39, IO34, IO35) | Leerlos; hoy no se usan |
+| **UID y MAC cruzados**: en banco las MAC quedaron cruzadas entre robots y ESP-NOW no funcionaba | Leer **juntos** `microcontroller.cpu.uid` y `wifi.radio.mac_address` de cada rover y compararlos con la tabla de la §4 |
 
 ### 8.2 Números hoy inventados (por calibrar)
 
@@ -381,8 +389,10 @@ primer arranque sin USB. La PC de visión debe seguir encendida y en la misma re
   apagado porque empeoraba el empuje.
 - **Información imperfecta**: hoy un cubo no fresco manda al rover a `BUSCAR` (quieto); falta navegar a la última posición
   conocida o un patrón de búsqueda.
-- **Sensor de color** (agarre/entrega más fiables que solo el ultrasónico) e **IMU** (mantener rumbo entre cuadros de
-  visión; hoy el control es proporcional sobre el `theta` de la visión, sin PID).
+- **Módulo de luz** (presencia del cubo; **no distingue color**) para que el agarre y la entrega sean más fiables que con
+  solo el ultrasónico.
+- **IMU** (giroscopio) para mantener el rumbo entre cuadros de visión; hoy el control es proporcional sobre el `theta` de
+  la visión, sin PID.
 - **Botón de arranque** de la IdeaBoard (hoy arranca solo al ver `RUNNING`).
 - **Obstáculos** (el campo existe en el contrato, pero la primera edición va vacío).
 
@@ -447,7 +457,7 @@ hasta tener 3 corridas limpias · el firmware frena solo si se pierde la telemet
 | D3 | Giro en el sitio (grados/s con `theta` de la visión) | `GIRO_MAX` del simulador | ⏳ |
 | D4 | Desvío al ir "recto" 20 cuadros | `_factor_izq/_factor_der` en `motores.py` | ⏳ |
 | D5 | Offset marcador ↔ centro del chasis | Corrección en la lógica si hace falta | ⏳ |
-| D6 | Ultrasónico: dónde apunta y a qué distancia ve el cubo | `DISTANCIA_AGARRE_CM` | ⏳ |
+| D6 | Ultrasónico (probar TRIG/ECHO normal e invertido) y módulo de luz: dónde apuntan y a qué distancia ven el cubo | `DISTANCIA_AGARRE_CM` y, si se usa el módulo de luz, su umbral | ⏳ |
 | D7 | Actualizar constantes y simulador con lo medido; correr `pytest` | Tests siguen en verde | ⏳ |
 | D8 | Implementar la rampa de aceleración | Arranques suaves | ⏳ |
 
@@ -468,10 +478,10 @@ Ante un fallo: anotarlo, **reproducirlo en `simulador_fisico.py`**, corregir, `p
 
 | # | Qué | Estado |
 |---|---|---|
-| F1 | Negociación por ESP-NOW + reasignación dinámica (primero verificar que ESP-NOW convive con el WiFi) | ⏳ |
+| F1 | Negociación por ESP-NOW + reasignación dinámica. **Primero** resolver el canal: ESP-NOW debe usar el mismo canal que el WiFi de la visión (o el truco `start_ap`/`stop_ap` de las notas de banco) y comprobar UID/MAC | ⏳ |
 | F2 | Evitación de colisiones robusta | ⏳ |
 | F3 | Información imperfecta: navegar a la última posición conocida / búsqueda | ⏳ |
-| F4 | Sensor de color para agarre y entrega | ⏳ |
+| F4 | Sensor de agarre/entrega con el **módulo de luz** (presencia, no color) o los IR; decidir cómo repartir el NeoPixel de IO33 entre indicador y sensor | ⏳ |
 | F5 | IMU + PID para el rumbo | ⏳ |
 | F6 | Botón de arranque de la IdeaBoard | ⏳ |
 | F7 | Obstáculos (solo si vuelven en una edición futura) | ⏳ |
@@ -597,6 +607,9 @@ están en [`calibracion/`](calibracion/) (`patron.pdf` y `marcador_prueba.pdf`).
 | El LED no se enciende con `board.NEOPIXEL` | En estos rovers ese pin (IO2) no muestra nada; el LED está en IO33 (`config.PIN_LED`) |
 | El firmware se cae al arrancar por el pin IO33 | IO33 es el LED; no usarlo para otro periférico (`PIN_IR = None`) |
 | `e.send(...)` de ESP-NOW devuelve falsy aunque el mensaje llegó | Es normal en CircuitPython: verificar del lado receptor |
+| El ultrasónico no lee | Probar TRIG/ECHO intercambiados (fábrica IO26/IO25, banco IO25/IO26) y revisar el jumper SELECT–Vin |
+| ESP-NOW no entrega mensajes con el WiFi de la visión conectado | Los rovers terminan en canales distintos: fijar el mismo canal (ver §8.1) |
+| ESP-NOW no funciona entre dos rovers | Revisar que las MAC no estén cruzadas: leer UID y MAC juntos de cada rover |
 | El firmware aborta con `Falta VISION_HOST` | Falta `VISION_HOST` en el `settings.toml` del rover (LED rojo fijo) |
 | `RuntimeError: MAC desconocida` al arrancar | Placa distinta a las dos registradas: agregar su MAC a `ROVERS` en `firmware/config.py` |
 | El rover no conecta al WiFi | Red de 5 GHz (usar 2.4), SSID/clave mal escritos en `settings.toml`, o la PC está en otra red |
