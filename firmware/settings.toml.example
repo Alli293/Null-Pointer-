@@ -1,0 +1,6 @@
+# Copiar al dispositivo como /settings.toml (NO subir el real al repo).
+# Lo lee CircuitPython con os.getenv(). Mismo archivo para los dos rovers.
+CIRCUITPY_WIFI_SSID = "nombre-de-la-red"
+CIRCUITPY_WIFI_PASSWORD = "clave-de-la-red"
+VISION_HOST = "192.168.0.10"   # IP de la PC que corre el sistema de vision (o el mock_publisher)
+VISION_PORT = 2026

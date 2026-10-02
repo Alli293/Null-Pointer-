@@ -1,0 +1,14 @@
+{
+  "port": "COM4",
+  "mac": [
+    224,
+    140,
+    254,
+    39,
+    166,
+    120
+  ],
+  "missing": [
+    "comun/coordinacion.py"
+  ]
+}

@@ -1,0 +1,137 @@
+from comun.maquina_estados import (
+    RoverFSM,
+    ESTADO_BUSCAR,
+    ESTADO_APROXIMAR,
+    ESTADO_SUJETAR,
+    ESTADO_TRANSPORTAR,
+    ESTADO_ENTREGAR,
+    ESTADO_OCIOSO,
+    ESTADO_DETENIDO,
+)
+
+import datos_ejemplo as d
+
+
+def test_arranca_en_buscar():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    assert fsm.estado == ESTADO_BUSCAR
+
+
+def test_buscar_a_aproximar_con_cubo_fresco():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    estado = fsm.transicion(d.MSG_NORMAL)
+    assert estado == ESTADO_APROXIMAR
+
+
+def test_aproximar_vuelve_a_buscar_si_cubo_se_ocluye():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.transicion(d.MSG_NORMAL)  # -> APROXIMAR
+    estado = fsm.transicion(d.MSG_CUBO_OCLUIDO)
+    assert estado == ESTADO_BUSCAR
+
+
+def test_aproximar_a_sujetar_por_distancia():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.transicion(d.MSG_NORMAL)  # -> APROXIMAR
+    estado = fsm.transicion(d.MSG_CUBO_CERCA)
+    assert estado == ESTADO_SUJETAR
+
+
+def test_sujetar_a_transportar_cuando_sensor_confirma():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.transicion(d.MSG_NORMAL)
+    fsm.transicion(d.MSG_CUBO_CERCA)  # -> SUJETAR
+    estado = fsm.transicion(d.MSG_CUBO_CERCA, tiene_cubo=True)
+    assert estado == ESTADO_TRANSPORTAR
+
+
+def test_transportar_a_entregar_por_distancia_a_depot():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    estado = fsm.transicion(d.MSG_ROVER_EN_DEPOT)
+    assert estado == ESTADO_ENTREGAR
+
+
+def test_entregar_a_ocioso_cuando_sensor_confirma():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_ENTREGAR
+    # El cubo en MSG_ROVER_EN_DEPOT sigue lejos del depot (vision no lo confirmaria);
+    # solo pasa a OCIOSO porque el sensor del propio rover lo confirma.
+    estado = fsm.transicion(d.MSG_ROVER_EN_DEPOT, cubo_entregado=True)
+    assert estado == ESTADO_OCIOSO
+
+
+def test_entregar_a_ocioso_confirmado_solo_por_vision():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_ENTREGAR
+    # Sin cubo_entregado (sensor no dice nada) -- pero la vision ve el cubo
+    # asentado dentro de su zona, y eso alcanza (protocolo v2).
+    estado = fsm.transicion(d.MSG_CUBO_ENTREGADO)
+    assert estado == ESTADO_OCIOSO
+
+
+def test_entregar_no_pasa_a_ocioso_si_cubo_sigue_lejos():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_ENTREGAR
+    estado = fsm.transicion(d.MSG_ROVER_EN_DEPOT)  # sin sensor, cubo lejos del depot
+    assert estado == ESTADO_ENTREGAR
+
+
+def test_finished_detiene_desde_cualquier_estado():
+    for estado_inicial in (
+        ESTADO_BUSCAR, ESTADO_APROXIMAR, ESTADO_SUJETAR,
+        ESTADO_TRANSPORTAR, ESTADO_ENTREGAR, ESTADO_OCIOSO,
+    ):
+        fsm = RoverFSM(mi_id=10, color_asignado="green")
+        fsm.estado = estado_inicial
+        estado = fsm.transicion(d.MSG_FINISHED)
+        assert estado == ESTADO_DETENIDO
+
+
+def test_detenido_es_terminal_hasta_reasignar():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_DETENIDO
+    estado = fsm.transicion(d.MSG_NORMAL)  # aunque llegue telemetria normal
+    assert estado == ESTADO_DETENIDO
+
+
+def test_asignar_color_reactiva_desde_ocioso():
+    fsm = RoverFSM(mi_id=10, color_asignado="green")
+    fsm.estado = ESTADO_OCIOSO
+    fsm.asignar_color("blue")
+    assert fsm.estado == ESTADO_BUSCAR
+    assert fsm.color_asignado == "blue"
+
+
+# --- Agregados: entrega por zona con margen, cubo perdido --------------------
+
+def _msg_con_cubo(rover_pos, cubo_pos, depot_color="green"):
+    from tests import datos_ejemplo as d
+    msg = d._base(seq=50)
+    msg["rovers"] = [{"id": 10, "col": rover_pos[0], "row": rover_pos[1], "theta": 0, "age_ms": 0}]
+    msg["cubes"] = [{"color": depot_color, "col": cubo_pos[0], "row": cubo_pos[1], "age_ms": 0}]
+    return msg
+
+
+def test_transportar_a_entregar_cuando_cubo_entra_a_la_zona():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR, ESTADO_ENTREGAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    # depot verde en (21.5, 3.75): cubo adentro con margen, rover detras (lejos del centro)
+    assert fsm.transicion(_msg_con_cubo((21.5, 10.0), (21.5, 3.9)), tiene_cubo=True) == ESTADO_ENTREGAR
+
+
+def test_transportar_no_entrega_en_el_borde_de_la_zona():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    # cubo justo en el limite exacto de la zona: sin margen de seguridad no se suelta
+    limite = 21.5 + 5.0 - 3.0 * 1.4142 / 2 - 0.05
+    assert fsm.transicion(_msg_con_cubo((21.5, 12.0), (limite, 4.5)), tiene_cubo=True) == ESTADO_TRANSPORTAR
+
+
+def test_transportar_vuelve_a_aproximar_si_se_pierde_el_cubo():
+    from comun.maquina_estados import RoverFSM, ESTADO_TRANSPORTAR, ESTADO_APROXIMAR
+    fsm = RoverFSM(10, "green")
+    fsm.estado = ESTADO_TRANSPORTAR
+    assert fsm.transicion(_msg_con_cubo((10.0, 20.0), (25.0, 20.0))) == ESTADO_APROXIMAR

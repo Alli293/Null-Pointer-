@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.test-deps/
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+
+# MicroPython / flasheo
+*.bin
+*.uf2
+
+# Logs y datos locales de pruebas
+*.log
+settings.toml
+fotos/
+
+# Credenciales locales de CircuitPython
+secrets.py

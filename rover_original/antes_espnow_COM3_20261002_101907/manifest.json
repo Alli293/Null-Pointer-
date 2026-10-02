@@ -1,0 +1,16 @@
+{
+  "port": "COM3",
+  "mac": [
+    224,
+    140,
+    254,
+    37,
+    199,
+    72
+  ],
+  "missing": [
+    "firmware/buffer_ndjson.py",
+    "firmware/tcp_usuario.py",
+    "config.py"
+  ]
+}
